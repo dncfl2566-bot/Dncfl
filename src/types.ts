@@ -16,6 +16,7 @@ export interface Question {
   text: string;
   image?: string; // Optional image URL or base64
   choices?: string[]; // Only for multiple-choice (can be 4 or 5 options)
+  choiceImages?: string[]; // Optional images matching the choices (can be 4 or 5 options)
   correctAnswer: string; // The correct text or choice index (e.g. "0" for ก, or exact answer for short-answer)
 }
 

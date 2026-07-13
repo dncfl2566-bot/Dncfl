@@ -69,7 +69,7 @@ export default function SubmissionSummary({ submission, onDone }: SubmissionSumm
               </div>
 
               <div className="my-6 text-center">
-                {submission.cheated ? (
+                {submission.cheated && !submission.graded ? (
                   <div className="inline-block bg-red-50 text-red-700 px-4 py-2 rounded-lg border border-red-200 text-xs font-bold">
                     ⚠️ ถือเป็นโมฆะ (ตรวจพบทุจริต)
                   </div>
@@ -82,7 +82,7 @@ export default function SubmissionSummary({ submission, onDone }: SubmissionSumm
               </div>
 
               <div className="bg-blue-50/50 p-3 rounded-lg text-center text-xs font-semibold text-blue-900 border border-blue-100/50">
-                {submission.cheated 
+                {submission.cheated && !submission.graded 
                   ? 'ทุจริตการสอบ (ฝ่าฝืนคำแจ้งเตือนสลับหน้าจอ)' 
                   : `ทำถูกต้องคิดเป็น ${Math.round((submission.multipleChoiceScore / 15) * 100)}% ของข้อสอบทั้งหมด`
                 }

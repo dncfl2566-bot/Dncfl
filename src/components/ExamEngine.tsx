@@ -18,6 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Student, Question, Submission } from '../types';
 import CanvasDrawing from './CanvasDrawing';
+import MathRenderer from './MathRenderer';
 
 interface ExamEngineProps {
   student: Student;
@@ -69,6 +70,28 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
 
   // Auto-submit ref to avoid double submits
   const isSubmittingRef = useRef(false);
+
+  // Keep refs of current answers and cheating count to prevent stale closures in focus-loss event handlers
+  const mcAnswersRef = useRef(mcAnswers);
+  const shortAnswersRef = useRef(shortAnswers);
+  const writtenAnswerRef = useRef(writtenAnswer);
+  const cheatingCountRef = useRef(cheatingCount);
+
+  useEffect(() => {
+    mcAnswersRef.current = mcAnswers;
+  }, [mcAnswers]);
+
+  useEffect(() => {
+    shortAnswersRef.current = shortAnswers;
+  }, [shortAnswers]);
+
+  useEffect(() => {
+    writtenAnswerRef.current = writtenAnswer;
+  }, [writtenAnswer]);
+
+  useEffect(() => {
+    cheatingCountRef.current = cheatingCount;
+  }, [cheatingCount]);
 
   // Keyboard and Context Menu protection
   useEffect(() => {
@@ -232,11 +255,11 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
       number: student.number,
       gradeLevel: questions[0]?.gradeLevel || '3',
       set: student.number % 2 === 1 ? 'A' : 'B',
-      multipleChoiceAnswers: mcAnswers,
-      shortAnswers: shortAnswers,
-      writtenAnswer: writtenAnswer,
+      multipleChoiceAnswers: mcAnswersRef.current,
+      shortAnswers: shortAnswersRef.current,
+      writtenAnswer: writtenAnswerRef.current,
       timeTaken: timeTakenMin === 0 ? 1 : timeTakenMin,
-      cheatingWarningsCount: cheated ? 3 : cheatingCount
+      cheatingWarningsCount: cheated ? 3 : cheatingCountRef.current
     };
 
     try {
@@ -511,7 +534,7 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
               {/* Question Text */}
               <div className="text-base font-bold text-slate-800 mb-6 bg-slate-50/50 p-6 rounded-xl border border-slate-200/80 leading-relaxed">
                 <span className="text-lg text-blue-600 mr-2">ข้อที่ {mcIndex + 1}.</span>
-                {currentMcQ.text}
+                <MathRenderer text={currentMcQ.text} />
               </div>
 
               {/* Question Image if available */}
@@ -532,6 +555,10 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
                   const letterPrefix = ['ก', 'ข', 'ค', 'ง', 'จ'][idx];
                   const isSelected = mcAnswers[currentMcQ.id] === choiceValue;
                   
+                  // Map back to unshuffled index to get the correct choice image
+                  const originalIdx = currentMcQ.choices ? currentMcQ.choices.indexOf(choiceValue) : -1;
+                  const choiceImg = (originalIdx !== -1 && currentMcQ.choiceImages) ? currentMcQ.choiceImages[originalIdx] : undefined;
+                  
                   return (
                     <button
                       key={idx}
@@ -543,20 +570,34 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
                           [currentMcQ.id]: choiceValue
                         });
                       }}
-                      className={`p-4 rounded-xl border-2 text-left transition-all flex items-center gap-4 cursor-pointer ${
+                      className={`p-4 rounded-xl border-2 text-left transition-all flex items-start gap-4 cursor-pointer ${
                         isSelected
                           ? 'border-blue-600 bg-blue-50 text-[#002B49] font-bold shadow-sm'
                           : 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/30 text-slate-700'
                       }`}
                     >
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0 border transition-all ${
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0 border transition-all mt-0.5 ${
                         isSelected 
                           ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
                           : 'bg-slate-100 text-slate-500 border-slate-200'
                       }`}>
                         {letterPrefix}
                       </div>
-                      <span className="text-sm font-semibold">{choiceValue}</span>
+                      <div className="flex-grow flex flex-col gap-2">
+                        <span className="text-sm font-semibold">
+                          <MathRenderer text={choiceValue} />
+                        </span>
+                        {choiceImg && (
+                          <div className="mt-1 bg-white p-1 rounded border border-slate-100 flex justify-center max-h-[140px] overflow-hidden">
+                            <img
+                              src={choiceImg}
+                              alt={`รูปประกอบตัวเลือก ${letterPrefix}`}
+                              className="max-h-[120px] object-contain rounded"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
@@ -645,7 +686,7 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
                 <div key={q.id} className="p-6 border border-slate-200/80 rounded-xl bg-white space-y-4 shadow-sm">
                   <div className="text-sm font-bold text-slate-800 leading-relaxed">
                     <span className="text-amber-600 mr-1.5">ข้อที่ {index + 1}.</span>
-                    {q.text}
+                    <MathRenderer text={q.text} />
                   </div>
                   
                   {/* Question Image if available */}
@@ -659,7 +700,60 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
                       />
                     </div>
                   )}
-                  <div className="relative max-w-sm">
+                  <div className="relative max-w-md w-full">
+                    {/* Math Toolbar Helper for Student */}
+                    <div className="bg-slate-50 p-2.5 rounded-t-lg border border-b-0 border-slate-200 w-full">
+                      <p className="text-[10px] text-slate-500 font-bold mb-1">เครื่องมือพิมพ์สัญลักษณ์คณิตศาสตร์ (คลิกเพื่อใส่สัญลักษณ์):</p>
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { label: 'เศษส่วน', value: '\\frac{เศษ}{ส่วน}', desc: 'เศษส่วน' },
+                          { label: 'สแควรูท', value: '\\sqrt{x}', desc: 'รากที่สอง' },
+                          { label: 'เลขยกกำลัง', value: 'x^{y}', desc: 'ยกกำลัง' },
+                          { label: 'π (พาย)', value: '\\pi', desc: 'พาย' },
+                          { label: '× (คูณ)', value: '\\times', desc: 'เครื่องหมายคูณ' },
+                          { label: '÷ (หาร)', value: '\\div', desc: 'เครื่องหมายหาร' },
+                          { label: '± (บวก/ลบ)', value: '\\pm', desc: 'บวกหรือลบ' },
+                          { label: '≥ (มากกว่าเท่ากับ)', value: '\\ge', desc: 'มากกว่าเท่ากับ' },
+                          { label: '≤ (น้อยกว่าเท่ากับ)', value: '\\le', desc: 'น้อยกว่าเท่ากับ' },
+                          { label: '° (องศา)', value: '^{\\circ}', desc: 'องศา' },
+                          { label: 'มุม', value: '\\angle', desc: 'มุม' },
+                          { label: '≈ (ประมาณ)', value: '\\approx', desc: 'ประมาณ' },
+                        ].map((sym) => (
+                          <button
+                            key={sym.label}
+                            type="button"
+                            title={sym.desc}
+                            onClick={() => {
+                              const currentVal = shortAnswers[q.id] || '';
+                              const inputEl = document.getElementById(`input-sa-${q.id}`) as HTMLInputElement;
+                              if (inputEl) {
+                                const start = inputEl.selectionStart || 0;
+                                const end = inputEl.selectionEnd || 0;
+                                const newVal = currentVal.substring(0, start) + sym.value + currentVal.substring(end);
+                                setShortAnswers({
+                                  ...shortAnswers,
+                                  [q.id]: newVal
+                                });
+                                // Set cursor position back after the inserted value
+                                setTimeout(() => {
+                                  inputEl.focus();
+                                  const nextPos = start + sym.value.length;
+                                  inputEl.setSelectionRange(nextPos, nextPos);
+                                }, 50);
+                              } else {
+                                setShortAnswers({
+                                  ...shortAnswers,
+                                  [q.id]: currentVal + sym.value
+                                });
+                              }
+                            }}
+                            className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded text-[10px] font-bold border border-slate-200 shadow-3xs transition-colors cursor-pointer flex items-center gap-0.5"
+                          >
+                            <span>{sym.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <input
                       type="text"
                       id={`input-sa-${q.id}`}
@@ -670,9 +764,19 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
                           [q.id]: e.target.value
                         });
                       }}
-                      placeholder="พิมพ์คำตอบของท่านที่นี่"
-                      className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-sm font-semibold font-mono"
+                      placeholder="พิมพ์คำตอบของท่านที่นี่ (สามารถพิมพ์หรือคลิกใช้ปุ่มคณิตศาสตร์ข้างบน)"
+                      className="w-full px-4 py-2.5 rounded-b-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-sm font-semibold font-mono"
                     />
+
+                    {/* Live math equations preview */}
+                    {shortAnswers[q.id] && (
+                      <div className="mt-2 bg-amber-50/50 p-2.5 border border-amber-200/60 rounded-lg">
+                        <span className="text-slate-500 block text-[9px] font-bold">แสดงการแสดงผลทางคณิตศาสตร์แบบเรียลไทม์ (Math Live Preview):</span>
+                        <div className="mt-1 py-1.5 px-3 bg-white rounded border border-slate-200/60 min-h-[36px] flex items-center justify-start text-sm text-slate-800">
+                          <MathRenderer text={`$${shortAnswers[q.id]}$`} />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -722,7 +826,7 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 space-y-4">
                 <p className="text-xs font-bold text-red-600 uppercase tracking-wider">โจทย์แสดงวิธีทำ:</p>
                 <p className="text-base font-bold text-slate-800 leading-relaxed font-sans">
-                  {writtenQuestion.text}
+                  <MathRenderer text={writtenQuestion.text} />
                 </p>
                 
                 {/* Question Image if available */}
@@ -862,8 +966,11 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
                 </div>
                 <div className="p-4 bg-white divide-y divide-slate-100">
                   {saQuestions.map((q, index) => (
-                    <div key={q.id} className="py-2.5 first:pt-0 last:pb-0 flex justify-between gap-4 text-xs font-medium">
-                      <span className="text-slate-500 shrink-0">ข้อที่ {index + 1}: {q.text.substring(0, 45)}...</span>
+                    <div key={q.id} className="py-2.5 first:pt-0 last:pb-0 flex justify-between gap-4 text-xs font-medium items-center">
+                      <span className="text-slate-500 shrink-0 flex items-center gap-1">
+                        <span>ข้อที่ {index + 1}:</span>
+                        <MathRenderer text={q.text.length > 45 ? `${q.text.substring(0, 45)}...` : q.text} />
+                      </span>
                       <span className={`font-mono font-bold ${shortAnswers[q.id] ? 'text-slate-800' : 'text-red-500'}`}>
                         {shortAnswers[q.id] ? `"${shortAnswers[q.id]}"` : '(ไม่ได้ตอบ)'}
                       </span>

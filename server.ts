@@ -9,7 +9,7 @@ import { Student, Question, Submission, SystemState } from "./src/types";
 import http from "http";
 import https from "https";
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), "db.json");
 
 // Parse CSV content into Student[]
@@ -170,14 +170,56 @@ function readDb(): SystemState {
   return state;
 }
 
-// Write database
+// Write database with high-concurrency atomic serialization
+let isWritingDb = false;
+let pendingDbWriteState: SystemState | null = null;
+
 function writeDb(state: SystemState) {
+  cachedDbState = state;
+  pendingDbWriteState = state;
+  triggerDbWrite();
+}
+
+function triggerDbWrite() {
+  if (isWritingDb || !pendingDbWriteState) return;
+  isWritingDb = true;
+  const stateToWrite = pendingDbWriteState;
+  pendingDbWriteState = null;
+
+  const tempPath = DB_FILE + ".tmp";
+  fs.writeFile(tempPath, JSON.stringify(stateToWrite), "utf-8", (err) => {
+    if (err) {
+      console.error("Atomic write failed at step 1:", err);
+      isWritingDb = false;
+      triggerDbWrite();
+      return;
+    }
+    fs.rename(tempPath, DB_FILE, (renameErr) => {
+      isWritingDb = false;
+      if (renameErr) {
+        console.error("Atomic rename failed:", renameErr);
+      }
+      triggerDbWrite();
+    });
+  });
+}
+
+function getThailandTimestamp(): string {
   try {
-    cachedDbState = state;
-    // Compact JSON is exponentially faster to stringify and write with base64 images
-    fs.writeFileSync(DB_FILE, JSON.stringify(state), "utf-8");
-  } catch (err) {
-    console.error("Error writing to database:", err);
+    return new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).format(new Date());
+  } catch (e) {
+    const d = new Date();
+    d.setHours(d.getHours() + 7);
+    return d.toISOString().replace('T', ' ').substring(0, 19);
   }
 }
 
@@ -316,12 +358,11 @@ async function startServer() {
       timeTaken,
       cheatingWarningsCount,
       cheated: isCheated,
-      submittedAt: new Date().toISOString(),
+      submittedAt: getThailandTimestamp(),
       graded: false
     };
 
-    // Remove any previous submission for this student to avoid duplicates
-    state.submissions = state.submissions.filter(s => s.studentId !== studentId);
+    // Keep all previous submissions as requested for multi-attempt support
     state.submissions.push(submission);
     
     writeDb(state);
@@ -444,7 +485,8 @@ async function startServer() {
       sub.shortAnswers = editedShortAnswers;
     }
     
-    sub.multipleChoiceScore = sub.cheated ? 0 : mcScore;
+    // The admin has full grading discretion even if the student's warning count is high
+    sub.multipleChoiceScore = mcScore;
     sub.shortAnswerScores = shortAnswerScores;
     sub.writtenScore = parseFloat(writtenScore) || 0;
     
@@ -454,16 +496,11 @@ async function startServer() {
       saSum += parseFloat(shortAnswerScores[qId]) || 0;
     });
 
-    if (sub.cheated) {
-      sub.totalScore = 0;
-      sub.feedback = feedback || "ทุจริตการสอบ (คะแนนเป็น 0)";
-    } else {
-      sub.totalScore = sub.multipleChoiceScore + saSum + sub.writtenScore;
-      sub.feedback = feedback;
-    }
+    sub.totalScore = sub.multipleChoiceScore + saSum + sub.writtenScore;
+    sub.feedback = feedback;
 
     sub.graded = true;
-    sub.gradedAt = new Date().toISOString();
+    sub.gradedAt = getThailandTimestamp();
 
     state.submissions[subIdx] = sub;
     writeDb(state);
@@ -600,6 +637,19 @@ async function startServer() {
     }
   });
 
+  // ADMIN API: Bulk delete questions
+  app.post("/api/admin/questions/bulk-delete", (req, res) => {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) {
+      return res.status(400).json({ success: false, message: "กรุณาระบุรหัสข้อสอบที่ต้องการลบ" });
+    }
+    const state = readDb();
+    const initialLen = state.questions.length;
+    state.questions = state.questions.filter(q => !ids.includes(q.id));
+    writeDb(state);
+    res.json({ success: true, count: initialLen - state.questions.length, message: "ลบข้อสอบที่เลือกสำเร็จ" });
+  });
+
   // Serve uploaded images statically
   app.use("/uploads", express.static(path.join(process.cwd(), "public/uploads")));
 
@@ -618,9 +668,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
 startServer();

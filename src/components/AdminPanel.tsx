@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, 
   Database, 
@@ -19,17 +19,19 @@ import {
   LogOut,
   AlertOctagon,
   RefreshCw,
+  BarChart2,
   Image as ImageIcon
 } from 'lucide-react';
 import { Student, Question, Submission, QuestionType } from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
+import MathRenderer from './MathRenderer';
 
 interface AdminPanelProps {
   onLogout: () => void;
 }
 
 export default function AdminPanel({ onLogout }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'students' | 'questions' | 'submissions'>('submissions');
+  const [activeTab, setActiveTab] = useState<'students' | 'questions' | 'submissions' | 'summary'>('submissions');
   
   // Data lists
   const [students, setStudents] = useState<Student[]>([]);
@@ -41,11 +43,16 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [message, setMessage] = useState({ text: '', type: 'info' });
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Bulk Questions select state & ref
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+  const [showAbsentModal, setShowAbsentModal] = useState(false);
+  const questionTextRef = useRef<HTMLTextAreaElement | null>(null);
+
   // Forms / Modals
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentForm, setStudentForm] = useState({ id: '', name: '', class: '3/2', number: 1 });
-  const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ id: string, type: 'student' | 'question', name: string } | null>(null);
+  const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ id: string, type: 'student' | 'question' | 'submission' | 'bulk-questions', name: string } | null>(null);
 
   const [sheetUrl, setSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0');
 
@@ -59,6 +66,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     text: string;
     image: string;
     choices: string[];
+    choiceImages: string[];
     correctAnswer: string;
   }>({
     gradeLevel: '3',
@@ -68,8 +76,42 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     text: '',
     image: '',
     choices: ['', '', '', ''],
+    choiceImages: ['', '', '', ''],
     correctAnswer: ''
   });
+
+  const [focusedInputId, setFocusedInputId] = useState<string>('form-q-text');
+
+  const insertMathSymbol = (symValue: string) => {
+    const inputEl = document.getElementById(focusedInputId) as HTMLInputElement | HTMLTextAreaElement;
+    if (!inputEl) return;
+
+    const start = inputEl.selectionStart || 0;
+    const end = inputEl.selectionEnd || 0;
+    const currentVal = inputEl.value;
+    const newVal = currentVal.substring(0, start) + symValue + currentVal.substring(end);
+
+    // Update the state
+    if (focusedInputId === 'form-q-text') {
+      setQuestionForm(prev => ({ ...prev, text: newVal }));
+    } else if (focusedInputId === 'form-q-ans') {
+      setQuestionForm(prev => ({ ...prev, correctAnswer: newVal }));
+    } else if (focusedInputId.startsWith('form-q-choice-')) {
+      const choiceIdx = parseInt(focusedInputId.replace('form-q-choice-', ''), 10);
+      if (!isNaN(choiceIdx)) {
+        const updatedChoices = [...questionForm.choices];
+        updatedChoices[choiceIdx] = newVal;
+        setQuestionForm(prev => ({ ...prev, choices: updatedChoices }));
+      }
+    }
+
+    // Set cursor position back
+    setTimeout(() => {
+      inputEl.focus();
+      const nextPos = start + symValue.length;
+      inputEl.setSelectionRange(nextPos, nextPos);
+    }, 50);
+  };
 
   const [gradingSubmission, setGradingSubmission] = useState<Submission | null>(null);
   const [gradingForm, setGradingForm] = useState<{
@@ -185,14 +227,70 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     setGoogleAccessToken(null);
     setGoogleUser(null);
     localStorage.removeItem('google_access_token');
+    localStorage.removeItem('google_drive_folder_id');
     showMsg('ยกเลิกการเชื่อมต่อบัญชี Google เรียบร้อย', 'info');
+  };
+
+  const getOrCreateDriveFolder = async (token: string): Promise<string> => {
+    const savedFolderId = localStorage.getItem('google_drive_folder_id');
+    if (savedFolderId) {
+      return savedFolderId;
+    }
+
+    try {
+      // 1. Search for existing folder
+      const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='Math Exam Images' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+      const searchRes = await fetch(searchUrl, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (searchData.files && searchData.files.length > 0) {
+          const folderId = searchData.files[0].id;
+          localStorage.setItem('google_drive_folder_id', folderId);
+          return folderId;
+        }
+      }
+
+      // 2. Create new folder if not found
+      const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: 'Math Exam Images',
+          mimeType: 'application/vnd.google-apps.folder'
+        })
+      });
+
+      if (createRes.ok) {
+        const folderData = await createRes.json();
+        localStorage.setItem('google_drive_folder_id', folderData.id);
+        return folderData.id;
+      }
+    } catch (e) {
+      console.error('Error getting or creating Google Drive folder:', e);
+    }
+
+    // Default fallback
+    return 'root';
+  };
+
+  const getCurrentSpreadsheetId = (): string => {
+    const matches = sheetUrl.trim().match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (matches && matches[1]) {
+      return matches[1];
+    }
+    return '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods'; // Fallback
   };
 
   // Upload image logic (Supports Google Drive Folder & Local backup)
   const handleUploadImageFile = async (file: File): Promise<string> => {
     if (googleAccessToken) {
       try {
-        const folderId = '1EbKMnX8twSAStZxjJXidlv_1D5G5u6GR';
+        const folderId = await getOrCreateDriveFolder(googleAccessToken);
         const metadata = {
           name: `${Date.now()}-${file.name}`,
           mimeType: file.type,
@@ -271,7 +369,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
 
     setGoogleSyncing(true);
     try {
-      const spreadsheetId = '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods';
+      const spreadsheetId = getCurrentSpreadsheetId();
       
       // Clear current contents of A:E
       const clearRange = 'Sheet1!A:E';
@@ -324,12 +422,132 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // Delete submission
-  const handleDeleteSubmission = async (subId: string) => {
-    if (!window.confirm('คุณแน่ใจหรือไม่ที่จะลบกระดาษคำตอบของนักเรียนรายนี้? ข้อมูลคำตอบและผลคะแนนจะถูกลบถาวรทันที')) {
+  // Sync Submissions and Grades to Google Sheet
+  const syncSubmissionsToGoogleSheet = async () => {
+    if (!googleAccessToken) {
+      showMsg('กรุณาลงชื่อเข้าใช้ Google เพื่อซิงก์ข้อมูลรายงานคะแนน', 'error');
       return;
     }
 
+    setGoogleSyncing(true);
+    try {
+      const spreadsheetId = getCurrentSpreadsheetId();
+      
+      // Try to create the 'รายงานคะแนนสอบ' sheet tab (errors if already exists, which we catch and ignore)
+      try {
+        await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            requests: [
+              {
+                addSheet: {
+                  properties: {
+                    title: 'รายงานคะแนนสอบ'
+                  }
+                }
+              }
+            ]
+          })
+        });
+      } catch (err) {
+        // Ignored
+      }
+
+      // Clear existing content in 'รายงานคะแนนสอบ' A:K
+      const clearRange = 'รายงานคะแนนสอบ!A:K';
+      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${googleAccessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      // Prepare data values
+      const values = [
+        [
+          'รหัสนักเรียน',
+          'ชื่อ-นามสกุล',
+          'ชั้นเรียน',
+          'เลขที่',
+          'ข้อสอบชุด',
+          'คะแนนปรนัย (MC)',
+          'คะแนนอัตนัย (SA)',
+          'คะแนนวิธีทำ (Written)',
+          'คะแนนรวมทั้งหมด',
+          'เวลาที่ส่ง (Thailand Time)',
+          'สถานะทุจริต'
+        ]
+      ];
+
+      submissions.forEach(s => {
+        let formattedTime = s.submittedAt;
+        try {
+          formattedTime = new Date(s.submittedAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+        } catch (_) {}
+
+        let saSum = 0;
+        if (s.shortAnswerScores) {
+          Object.values(s.shortAnswerScores).forEach(score => {
+            saSum += Number(score) || 0;
+          });
+        }
+
+        values.push([
+          s.studentId,
+          s.name,
+          `ม.${s.class}`,
+          s.number.toString(),
+          s.set,
+          s.multipleChoiceScore.toString(),
+          saSum.toString(),
+          s.writtenScore.toString(),
+          s.totalScore.toString(),
+          formattedTime,
+          s.cheated ? '⚠️ ทุจริต' : 'ปกติ'
+        ]);
+      });
+
+      const updateRange = 'รายงานคะแนนสอบ!A1';
+      const url = `https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
+
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${googleAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ values })
+      });
+
+      if (res.ok) {
+        showMsg('ซิงก์ข้อมูลรายงานผลสอบขึ้น Google Sheet แท็บ "รายงานคะแนนสอบ" สำเร็จ!', 'success');
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.error?.message || 'Failed to update submissions sheet');
+      }
+    } catch (err: any) {
+      console.error('Submissions sheet sync error:', err);
+      showMsg(`ซิงก์ผลคะแนนล้มเหลว: ${err.message}`, 'error');
+    } finally {
+      setGoogleSyncing(false);
+    }
+  };
+
+  // Delete submission
+  const handleDeleteSubmission = (subId: string, name: string) => {
+    setDeleteConfirmInfo({
+      id: subId,
+      type: 'submission',
+      name: `กระดาษคำตอบของนักเรียน: ${name} (รหัสกระดาษคำตอบ: ${subId})`
+    });
+  };
+
+  const proceedDeleteSubmission = async (subId: string) => {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/submissions/delete', {
@@ -340,7 +558,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       const data = await res.json();
       if (data.success) {
         setSubmissions(submissions.filter(s => s.id !== subId));
-        showMsg('ลบกระดาษคำตอบของนักเรียนสำเร็จ', 'success');
+        showMsg('ลบกระดาษคำตอบของนักเรียนสำเร็จเรียบร้อยแล้ว', 'success');
       } else {
         showMsg(data.message || 'ลบไม่สำเร็จ', 'error');
       }
@@ -501,6 +719,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           text: questionForm.text.trim(),
           image: questionForm.image.trim() || undefined,
           choices: questionForm.type === 'multiple-choice' ? questionForm.choices.filter(c => c.trim()) : undefined,
+          choiceImages: questionForm.type === 'multiple-choice' ? questionForm.choiceImages : undefined,
           correctAnswer: questionForm.correctAnswer.trim()
         };
 
@@ -513,6 +732,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           text: questionForm.text.trim(),
           image: questionForm.image.trim() || undefined,
           choices: questionForm.type === 'multiple-choice' ? questionForm.choices.filter(c => c.trim()) : undefined,
+          choiceImages: questionForm.type === 'multiple-choice' ? questionForm.choiceImages : undefined,
           correctAnswer: questionForm.correctAnswer.trim()
         };
 
@@ -538,6 +758,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           text: questionForm.text.trim(),
           image: questionForm.image.trim() || undefined,
           choices: questionForm.type === 'multiple-choice' ? questionForm.choices.filter(c => c.trim()) : undefined,
+          choiceImages: questionForm.type === 'multiple-choice' ? questionForm.choiceImages : undefined,
           correctAnswer: questionForm.correctAnswer.trim()
         };
 
@@ -590,12 +811,82 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       const data = await res.json();
       if (data.success) {
         setQuestions(questions.filter(q => q.id !== qId));
+        setSelectedQuestionIds(prev => prev.filter(id => id !== qId));
         showMsg('ลบข้อสอบสำเร็จ', 'success');
       }
     } catch (err) {
       showMsg('ข้อผิดพลาดการเชื่อมต่อ', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBulkDeleteQuestions = () => {
+    if (selectedQuestionIds.length === 0) return;
+    setDeleteConfirmInfo({
+      id: 'bulk',
+      type: 'bulk-questions',
+      name: `ข้อสอบที่เลือกทั้งหมดจำนวน ${selectedQuestionIds.length} ข้อ`
+    });
+  };
+
+  const proceedBulkDeleteQuestions = async () => {
+    if (selectedQuestionIds.length === 0) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/questions/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedQuestionIds })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setQuestions(questions.filter(q => !selectedQuestionIds.includes(q.id)));
+        setSelectedQuestionIds([]);
+        showMsg('ลบข้อสอบที่เลือกสำเร็จเรียบร้อยแล้ว!', 'success');
+      } else {
+        showMsg(data.message || 'เกิดข้อผิดพลาดในการลบข้อมูล', 'error');
+      }
+    } catch (err) {
+      showMsg('ข้อผิดพลาดในการเชื่อมต่อ', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getFilteredQuestions = () => {
+    return questions.filter(q => {
+      const s = searchQuery.toLowerCase().trim();
+      if (!s) return true;
+      const typeTh = q.type === 'multiple-choice' ? 'ปรนัย' : q.type === 'short-answer' ? 'อัตนัยเติมคำ' : 'วิธีทำ';
+      return q.text.toLowerCase().includes(s) || 
+             q.id.toLowerCase().includes(s) || 
+             `ม.${q.gradeLevel}`.toLowerCase().includes(s) ||
+             q.gradeLevel.toLowerCase().includes(s) ||
+             q.set.toLowerCase().includes(s) ||
+             typeTh.includes(s);
+    });
+  };
+
+  const isAllFilteredSelected = () => {
+    const filtered = getFilteredQuestions();
+    if (filtered.length === 0) return false;
+    return filtered.every(q => selectedQuestionIds.includes(q.id));
+  };
+
+  const handleToggleSelectAllQuestions = () => {
+    const filtered = getFilteredQuestions();
+    if (isAllFilteredSelected()) {
+      const filteredIds = filtered.map(q => q.id);
+      setSelectedQuestionIds(prev => prev.filter(id => !filteredIds.includes(id)));
+    } else {
+      const newSelections = [...selectedQuestionIds];
+      filtered.forEach(q => {
+        if (!newSelections.includes(q.id)) {
+          newSelections.push(q.id);
+        }
+      });
+      setSelectedQuestionIds(newSelections);
     }
   };
 
@@ -732,6 +1023,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       text: q.text,
       image: q.image || '',
       choices: q.choices ? [...q.choices] : ['', '', '', ''],
+      choiceImages: q.choiceImages ? [...q.choiceImages] : (q.choices ? q.choices.map(() => '') : ['', '', '', '']),
       correctAnswer: q.correctAnswer
     });
     setIsQuestionModalOpen(true);
@@ -747,6 +1039,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       text: '',
       image: '',
       choices: ['', '', '', ''],
+      choiceImages: ['', '', '', ''],
       correctAnswer: ''
     });
     setIsQuestionModalOpen(true);
@@ -837,7 +1130,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
               </p>
             </div>
           </div>
-          <div className="flex gap-2 w-full md:w-auto">
+          <div className="flex flex-wrap gap-2 w-full md:w-auto">
             {googleAccessToken ? (
               <>
                 <button
@@ -846,7 +1139,15 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   disabled={googleSyncing}
                   className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
-                  {googleSyncing ? 'กำลังซิงก์ข้อมูล...' : 'ซิงก์นักเรียนลง Google Sheet'}
+                  {googleSyncing ? 'กำลังซิงก์ข้อมูล...' : 'ซิงก์นักเรียนลง Sheet'}
+                </button>
+                <button
+                  type="button"
+                  onClick={syncSubmissionsToGoogleSheet}
+                  disabled={googleSyncing}
+                  className="px-3.5 py-2 bg-[#002B49] hover:bg-[#002B49]/90 disabled:bg-blue-400 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  {googleSyncing ? 'กำลังซิงก์ข้อมูล...' : 'ซิงก์รายงานคะแนนลง Sheet'}
                 </button>
                 <button
                   type="button"
@@ -897,6 +1198,15 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
             >
               <Database size={16} />
               <span>คลังข้อสอบ ({questions.length})</span>
+            </button>
+            <button
+              onClick={() => { setActiveTab('summary'); setSearchQuery(''); }}
+              className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+                activeTab === 'summary' ? 'bg-[#002B49] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <BarChart2 size={16} />
+              <span>ภาพรวมรายห้อง ({Array.from(new Set(students.map(s => s.class))).length} ห้อง)</span>
             </button>
           </div>
 
@@ -968,11 +1278,29 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                         saScore += sub.shortAnswerScores[qId] || 0;
                       });
 
+                      // Calculate student attempts
+                      const studentSubs = submissions
+                        .filter(s => s.studentId === sub.studentId)
+                        .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+                      const attemptNumber = studentSubs.findIndex(s => s.id === sub.id) + 1;
+                      const totalAttempts = studentSubs.length;
+
                       return (
                         <tr key={sub.id} className="hover:bg-slate-50 font-medium">
                           <td className="py-3 px-4">
-                            <div className="font-bold text-slate-800">{sub.name}</div>
+                            <div className="font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
+                              <span>{sub.name}</span>
+                              {totalAttempts > 1 && (
+                                <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 shrink-0">
+                                  รอบที่ {attemptNumber}/{totalAttempts}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-slate-400 font-mono">ID: {sub.studentId} | เลขที่: {sub.number}</div>
+                            <div className="text-[10px] text-blue-700 font-bold mt-1 flex items-center gap-1 flex-wrap">
+                              <span className="text-slate-400 font-normal">ส่งเมื่อ:</span>
+                              <span>{sub.submittedAt}</span>
+                            </div>
                           </td>
                           <td className="py-3 px-4">ม.{sub.class}</td>
                           <td className="py-3 px-4">
@@ -981,13 +1309,13 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                             </span>
                           </td>
                           <td className="py-3 px-4 text-center font-bold text-slate-700">
-                            {sub.cheated ? <span className="text-red-500">0</span> : sub.multipleChoiceScore}
+                            {(sub.cheated && !sub.graded) ? <span className="text-red-500">0</span> : sub.multipleChoiceScore}
                           </td>
                           <td className="py-3 px-4 text-center text-slate-500">{saScore}</td>
                           <td className="py-3 px-4 text-center text-slate-500">{sub.writtenScore}</td>
                           <td className="py-3 px-4 text-center">
                             <span className="bg-blue-100 text-blue-900 font-bold px-2.5 py-1 rounded">
-                              {sub.cheated ? 0 : sub.totalScore} / 30
+                              {(sub.cheated && !sub.graded) ? 0 : sub.totalScore} / 30
                             </span>
                           </td>
                           <td className="py-3 px-4 text-center">
@@ -1019,7 +1347,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                               <button
                                 type="button"
                                 id={`btn-delete-sub-${sub.id}`}
-                                onClick={() => handleDeleteSubmission(sub.id)}
+                                onClick={() => handleDeleteSubmission(sub.id, sub.name)}
                                 className="px-2 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded font-bold text-[11px] transition-all cursor-pointer"
                                 title="ลบข้อมูลกระดาษคำตอบของนักเรียนคนนี้"
                               >
@@ -1033,6 +1361,177 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'summary' && (
+          <div className="space-y-6" id="tab-summary">
+            {/* Top Stat Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="text-slate-400 font-bold text-[10px] uppercase">นักเรียนทั้งหมด</div>
+                <div className="text-3xl font-black text-[#002B49] mt-1">{students.length} <span className="text-xs font-semibold text-slate-400">คน</span></div>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="text-green-600 font-bold text-[10px] uppercase">เข้าสอบแล้ว</div>
+                <div className="text-3xl font-black text-green-700 mt-1">
+                  {(() => {
+                    const uniqueSubmitters = new Set(submissions.map(s => s.studentId));
+                    return uniqueSubmitters.size;
+                  })()} <span className="text-xs font-semibold text-slate-400">คน</span>
+                </div>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="text-red-500 font-bold text-[10px] uppercase">ขาดสอบ</div>
+                <div className="text-3xl font-black text-red-600 mt-1">
+                  {(() => {
+                    const uniqueSubmitters = new Set(submissions.map(s => s.studentId));
+                    return students.filter(s => !uniqueSubmitters.has(s.id)).length;
+                  })()} <span className="text-xs font-semibold text-slate-400">คน</span>
+                </div>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="text-blue-600 font-bold text-[10px] uppercase">อัตราการเข้าสอบรวม</div>
+                <div className="text-3xl font-black text-blue-700 mt-1">
+                  {(() => {
+                    const uniqueSubmitters = new Set(submissions.map(s => s.studentId));
+                    const rate = students.length > 0 ? Math.round((uniqueSubmitters.size / students.length) * 100) : 0;
+                    return `${rate}%`;
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Classroom Breakdown Grid */}
+            <div className="bg-white rounded-2xl shadow border border-slate-200 p-6 space-y-6">
+              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                <BarChart2 className="text-[#002B49]" size={20} />
+                <h2 className="font-bold text-[#002B49] text-sm">สถิติการเข้าสอบจำแนกรายห้องเรียน</h2>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {(() => {
+                  // Get all unique classes sorted
+                  const uniqueClasses = Array.from(new Set(students.map(s => s.class))).sort();
+                  const uniqueSubmitters = new Set(submissions.map(s => s.studentId));
+
+                  if (uniqueClasses.length === 0) {
+                    return (
+                      <div className="col-span-full text-center py-12 text-slate-400 text-xs font-bold">
+                        ไม่มีข้อมูลห้องเรียนในระบบ กรุณานำเข้ารายชื่อนักเรียนก่อน
+                      </div>
+                    );
+                  }
+
+                  return uniqueClasses.map(cls => {
+                    const classStudents = students.filter(s => s.class === cls);
+                    const classSubmissions = classStudents.filter(s => uniqueSubmitters.has(s.id));
+                    const absentStudents = classStudents.filter(s => !uniqueSubmitters.has(s.id));
+
+                    const totalCount = classStudents.length;
+                    const submittedCount = classSubmissions.length;
+                    const absentCount = absentStudents.length;
+                    const percent = totalCount > 0 ? Math.round((submittedCount / totalCount) * 100) : 0;
+
+                    return (
+                      <div key={cls} className="bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                        <div className="flex justify-between items-center">
+                          <span className="font-black text-slate-800 text-sm">ห้อง ม.{cls}</span>
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold ${
+                            percent >= 80 ? 'bg-green-100 text-green-800' :
+                            percent >= 50 ? 'bg-amber-100 text-amber-800' :
+                            'bg-red-100 text-red-800'
+                          }`}>
+                            {percent}% เข้าสอบ
+                          </span>
+                        </div>
+
+                        {/* Progress bar */}
+                        <div className="w-full bg-slate-200 rounded-full h-3.5 overflow-hidden border border-slate-300">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              percent >= 80 ? 'bg-green-600' :
+                              percent >= 50 ? 'bg-amber-500' :
+                              'bg-red-500'
+                            }`}
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+
+                        {/* Stats Info */}
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="block text-[10px] text-slate-400 font-bold">ทั้งหมด</span>
+                            <span className="text-sm font-black text-slate-700">{totalCount} คน</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="block text-[10px] text-green-500 font-bold">ส่งแล้ว</span>
+                            <span className="text-sm font-black text-green-700">{submittedCount} คน</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="block text-[10px] text-red-400 font-bold">ขาดสอบ</span>
+                            <span className="text-sm font-black text-red-600">{absentCount} คน</span>
+                          </div>
+                        </div>
+
+                        {/* View Submitter Details */}
+                        {submittedCount > 0 && (
+                          <div className="space-y-2 bg-white p-3.5 rounded-lg border border-slate-200 mb-2">
+                            <div className="text-[11px] font-bold text-green-700 flex items-center gap-1">
+                              <span>🟢 รายชื่อผู้เข้าสอบแล้ว ({submittedCount} คน):</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                              {classStudents
+                                .filter(s => uniqueSubmitters.has(s.id))
+                                .map(student => {
+                                  const sub = submissions.find(s => s.studentId === student.id);
+                                  const scoreText = sub ? (sub.graded ? `${sub.totalScore} คะแนน` : 'รอตรวจ') : '';
+                                  const setLabel = sub ? `ชุด ${sub.set}` : '';
+                                  const cheatLabel = sub?.cheated ? '⚠️ ทุจริต' : '';
+
+                                  return (
+                                    <span
+                                      key={student.id}
+                                      className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                        sub?.cheated ? 'bg-red-50 text-red-800 border-red-200' : 'bg-green-50 text-green-700 border-green-200'
+                                      }`}
+                                    >
+                                      เลขที่ {student.number}. {student.name} ({setLabel} {scoreText ? `| ${scoreText}` : ''} {cheatLabel ? ` ${cheatLabel}` : ''})
+                                    </span>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* View Absentee Details */}
+                        {absentCount > 0 ? (
+                          <div className="space-y-2 bg-white p-3.5 rounded-lg border border-slate-200">
+                            <div className="text-[11px] font-bold text-red-700 flex items-center gap-1">
+                              <span>🔴 รายชื่อผู้ขาดสอบ ({absentCount} คน):</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                              {absentStudents.map(student => (
+                                <span
+                                  key={student.id}
+                                  className="inline-block bg-red-50 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded border border-red-200"
+                                >
+                                  เลขที่ {student.number}. {student.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center py-2 bg-green-50 rounded-lg text-green-700 text-[10px] font-bold border border-green-200">
+                            🎉 ยอดเยี่ยม! ทุกคนในห้องนี้ทำข้อสอบครบแล้ว
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
             </div>
           </div>
         )}
@@ -1081,49 +1580,52 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
 
             {/* Students List Table */}
             <div className="bg-white rounded-2xl shadow border border-slate-200 overflow-hidden flex flex-col">
-              <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+              <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center flex-wrap gap-3">
                 <div>
                   <h2 className="font-bold text-slate-800 text-sm">รายชื่อนักเรียนที่ลงทะเบียนสำเร็จ ({students.length} คน)</h2>
-                  <p className="text-xs text-slate-500">นักเรียนที่มีรหัสในตารางนี้จะสามารถเข้าสู่ระบบทำข้อสอบได้ตามลำดับ</p>
+                  <p className="text-xs text-slate-500">นักเรียนที่มีรหัสในตารางนี้จะสามารถเข้าสู่ระบบและทำข้อสอบวิชาคณิตศาสตร์ได้</p>
                 </div>
                 <button
                   type="button"
                   id="btn-add-student-modal"
                   onClick={openAddStudent}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end"
                 >
                   <Plus size={14} />
-                  <span>เพิ่มนักเรียนรายคน</span>
+                  <span>เพิ่มนักเรียนใหม่</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto flex-grow">
                 {filteredStudents.length === 0 ? (
-                  <div className="text-center py-12 text-slate-400 text-xs">
-                    ไม่พบข้อมูลรายชื่อนักเรียนในตาราง ค้นหาใหม่อีกครั้ง
+                  <div className="text-center py-16 text-slate-400 text-xs">
+                    ไม่พบข้อมูลรายชื่อนักเรียนในระบบ
                   </div>
                 ) : (
-                  <table className="w-full text-left text-xs text-slate-600">
+                  <table className="w-full text-left text-xs text-slate-600 font-sans">
                     <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold border-b border-slate-200">
                       <tr>
-                        <th className="py-3 px-4">รหัสนักเรียน (Username)</th>
-                        <th className="py-3 px-4">ชื่อ-นามสกุล</th>
-                        <th className="py-3 px-4">ห้องเรียน</th>
-                        <th className="py-3 px-4">เลขที่</th>
-                        <th className="py-3 px-4 text-right">การจัดการ</th>
+                        <th className="py-3 px-6">รหัสนักเรียน (ID)</th>
+                        <th className="py-3 px-6">ชื่อ-นามสกุล</th>
+                        <th className="py-3 px-6">ห้องเรียน</th>
+                        <th className="py-3 px-6">เลขที่</th>
+                        <th className="py-3 px-6 text-right">ดำเนินการ</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-slate-100 font-medium">
                       {filteredStudents.map(s => (
-                        <tr key={s.id} className="hover:bg-slate-50 font-medium">
-                          <td className="py-3 px-4 font-mono font-bold text-slate-800">{s.id}</td>
-                          <td className="py-3 px-4 text-slate-700">{s.name}</td>
-                          <td className="py-3 px-4">ม.{s.class}</td>
-                          <td className="py-3 px-4">เลขที่ {s.number}</td>
-                          <td className="py-3 px-4 text-right flex justify-end gap-1.5">
+                        <tr key={s.id} className="hover:bg-slate-50">
+                          <td className="py-3 px-6 font-mono text-slate-800 font-bold">{s.id}</td>
+                          <td className="py-3 px-6 text-slate-700 font-bold">{s.name}</td>
+                          <td className="py-3 px-6">
+                            <span className="bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded font-mono text-[10px] font-bold">
+                              ม.{s.class}
+                            </span>
+                          </td>
+                          <td className="py-3 px-6 font-mono">{s.number}</td>
+                          <td className="py-3 px-6 text-right flex justify-end gap-1.5 pt-3">
                             <button
                               type="button"
-                              id={`btn-edit-student-${s.id}`}
                               onClick={() => openEditStudent(s)}
                               className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors"
                             >
@@ -1131,7 +1633,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                             </button>
                             <button
                               type="button"
-                              id={`btn-delete-student-${s.id}`}
                               onClick={() => handleDeleteStudent(s)}
                               className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors"
                             >
@@ -1148,23 +1649,35 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           </div>
         )}
 
-        {/* TAB VIEW 3: QUESTION BANK MANAGEMENT */}
+        {/* TAB VIEW 3: QUESTION MANAGEMENT */}
         {activeTab === 'questions' && (
-          <div className="bg-white rounded-2xl shadow border border-slate-200 overflow-hidden flex flex-col" id="tab-questions">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div className="bg-white rounded-2xl shadow border border-slate-200 overflow-hidden flex-grow flex flex-col" id="tab-questions">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center flex-wrap gap-3">
               <div>
                 <h2 className="font-bold text-slate-800 text-sm">คลังและสุ่มข้อสอบ (Question Bank)</h2>
                 <p className="text-xs text-slate-500">จัดการ เพิ่ม แก้ไขตัวเลือก และคำตอบของโจทย์ข้อสอบทั้งหมดในระบบ</p>
               </div>
-              <button
-                type="button"
-                id="btn-add-question-modal"
-                onClick={openAddQuestion}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end"
-              >
-                <Plus size={14} />
-                <span>เพิ่มข้อสอบใหม่</span>
-              </button>
+              <div className="flex gap-2 shrink-0">
+                {selectedQuestionIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleBulkDeleteQuestions}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors self-end animate-fade-in"
+                  >
+                    <Trash2 size={14} />
+                    <span>ลบที่เลือก ({selectedQuestionIds.length} ข้อ)</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  id="btn-add-question-modal"
+                  onClick={openAddQuestion}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end"
+                >
+                  <Plus size={14} />
+                  <span>เพิ่มข้อสอบใหม่</span>
+                </button>
+              </div>
             </div>
 
             <div className="p-4 bg-amber-50 border-b border-amber-200 text-xs text-amber-800 leading-relaxed font-semibold">
@@ -1177,9 +1690,17 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   ไม่พบข้อมูลข้อสอบในระบบ
                 </div>
               ) : (
-                <table className="w-full text-left text-xs text-slate-600">
+                <table className="w-full text-left text-xs text-slate-600 font-sans">
                   <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold border-b border-slate-200">
                     <tr>
+                      <th className="py-3 px-4 w-12 text-center select-none">
+                        <input
+                          type="checkbox"
+                          checked={isAllFilteredSelected()}
+                          onChange={handleToggleSelectAllQuestions}
+                          className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                        />
+                      </th>
                       <th className="py-3 px-4">ID / ระดับชั้น</th>
                       <th className="py-3 px-4">ข้อสอบชุด</th>
                       <th className="py-3 px-4">ประเภท</th>
@@ -1189,20 +1710,24 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium">
-                    {questions
-                      .filter(q => {
-                        const s = searchQuery.toLowerCase().trim();
-                        if (!s) return true;
-                        const typeTh = q.type === 'multiple-choice' ? 'ปรนัย' : q.type === 'short-answer' ? 'อัตนัยเติมคำ' : 'วิธีทำ';
-                        return q.text.toLowerCase().includes(s) || 
-                               q.id.toLowerCase().includes(s) || 
-                               `ม.${q.gradeLevel}`.toLowerCase().includes(s) ||
-                               q.gradeLevel.toLowerCase().includes(s) ||
-                               q.set.toLowerCase().includes(s) ||
-                               typeTh.includes(s);
-                      })
-                      .map(q => (
-                        <tr key={q.id} className="hover:bg-slate-50">
+                    {getFilteredQuestions().map(q => {
+                      const isSelected = selectedQuestionIds.includes(q.id);
+                      return (
+                        <tr key={q.id} className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-blue-50/70 hover:bg-blue-50' : ''}`}>
+                          <td className="py-3 px-4 text-center select-none">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {
+                                setSelectedQuestionIds(prev =>
+                                  prev.includes(q.id)
+                                    ? prev.filter(id => id !== q.id)
+                                    : [...prev, q.id]
+                                );
+                              }}
+                              className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                            />
+                          </td>
                           <td className="py-3 px-4">
                             <div className="font-bold text-slate-800 font-sans">ม.{q.gradeLevel}</div>
                             <div className="text-[10px] text-slate-400 font-mono">ID: {q.id}</div>
@@ -1223,7 +1748,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           </td>
                           <td className="py-3 px-4">
                             <div className="line-clamp-2 text-slate-700 font-sans" title={q.text}>
-                              ข้อที่ {q.questionNumber}. {q.text}
+                              ข้อที่ {q.questionNumber}. <MathRenderer text={q.text} />
                             </div>
                             {q.image && (
                               <span className="inline-flex items-center gap-1.5 text-[10px] text-blue-600 font-semibold mt-1">
@@ -1234,10 +1759,9 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           <td className="py-3 px-4 font-mono font-bold text-blue-800">
                             {q.correctAnswer.length > 35 ? `${q.correctAnswer.substring(0, 35)}...` : q.correctAnswer}
                           </td>
-                          <td className="py-3 px-4 text-right flex justify-end gap-1 pt-4">
+                          <td className="py-3 px-4 text-right flex justify-end gap-1.5 pt-4">
                             <button
                               type="button"
-                              id={`btn-edit-q-${q.id}`}
                               onClick={() => openEditQuestion(q)}
                               className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors"
                             >
@@ -1245,7 +1769,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                             </button>
                             <button
                               type="button"
-                              id={`btn-delete-q-${q.id}`}
                               onClick={() => handleDeleteQuestion(q)}
                               className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors"
                             >
@@ -1253,7 +1776,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                             </button>
                           </td>
                         </tr>
-                      ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -1421,15 +1945,59 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-slate-700">โจทย์คำถาม (พิมพ์ข้อความ)</label>
+                <label className="block text-slate-700 font-semibold">โจทย์คำถาม (พิมพ์ข้อความ)</label>
+                {/* Math Symbol Helper Toolbar for Teacher */}
+                <div className="flex flex-wrap gap-1 bg-slate-50 p-2.5 rounded-t border border-b-0 border-slate-300">
+                  <span className="text-[10px] text-[#002B49] font-bold w-full mb-1">💡 เครื่องหมายคณิตศาสตร์ & เทมเพลต LaTeX (คลิกพิมพ์ใส่ช่องที่กำลังเลือก - โจทย์, ตัวเลือก หรือเฉลย):</span>
+                  {[
+                    { label: '+', value: '+' },
+                    { label: '−', value: '−' },
+                    { label: '×', value: '\\times ' },
+                    { label: '÷', value: '\\div ' },
+                    { label: '=', value: '=' },
+                    { label: '≠', value: '\\ne ' },
+                    { label: '√', value: '\\sqrt{x}' },
+                    { label: 'π', value: '\\pi ' },
+                    { label: '²', value: '^{2}' },
+                    { label: '³', value: '^{3}' },
+                    { label: '°', value: '^{\\circ}' },
+                    { label: '≈', value: '\\approx ' },
+                    { label: '≤', value: '\\le ' },
+                    { label: '≥', value: '\\ge ' },
+                    { label: 'เศษส่วน 🖩', value: '\\frac{a}{b}' },
+                    { label: 'ยกกำลัง 🖩', value: 'x^{y}' },
+                    { label: 'รากที่สอง 🖩', value: '\\sqrt{x}' },
+                    { label: 'สูตรบล็อก 🖩', value: '$$y = ax + b$$' },
+                  ].map((sym) => (
+                    <button
+                      key={sym.label}
+                      type="button"
+                      onClick={() => insertMathSymbol(sym.value)}
+                      className="px-2 py-0.5 bg-white hover:bg-blue-50 text-slate-700 rounded text-[10px] font-bold border border-slate-200 shadow-2xs transition-colors cursor-pointer"
+                    >
+                      {sym.label}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   value={questionForm.text}
                   id="form-q-text"
                   onChange={(e) => setQuestionForm({ ...questionForm, text: e.target.value })}
+                  onFocus={() => setFocusedInputId('form-q-text')}
                   rows={3}
                   placeholder="พิมพ์คำถามข้อสอบวิชาคณิตศาสตร์ที่นี่..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-b focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
                 />
+
+                {/* Question Live math preview for teacher */}
+                {questionForm.text && (
+                  <div className="mt-1.5 bg-slate-50 p-2 border border-slate-200 rounded text-xs">
+                    <span className="text-slate-400 block text-[9px] font-bold">พรีวิวการแสดงผลตัวโจทย์ (Live Preview):</span>
+                    <div className="mt-1 p-2 bg-white rounded border min-h-[32px] flex items-center justify-start text-xs font-semibold">
+                      <MathRenderer text={questionForm.text} />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -1487,23 +2055,90 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
               {/* Multiple Choice specific input */}
               {questionForm.type === 'multiple-choice' && (
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3.5">
-                  <p className="text-[11px] text-[#002B49] font-bold">กำหนดตัวเลือกตอบ ก ข ค ง (และ จ ถ้าต้องการ):</p>
+                  <p className="text-[11px] text-[#002B49] font-bold">กำหนดตัวเลือกตอบ ก ข ค ง (และ จ ถ้าต้องการ) พร้อมรูปภาพตัวเลือก:</p>
                   
                   {questionForm.choices.map((choiceText, cIdx) => (
-                    <div key={cIdx} className="flex gap-2 items-center">
-                      <span className="w-8 shrink-0 text-slate-500 text-center font-bold">ตัวเลือก {['ก', 'ข', 'ค', 'ง', 'จ'][cIdx]}</span>
-                      <input
-                        type="text"
-                        value={choiceText}
-                        id={`form-q-choice-${cIdx}`}
-                        onChange={(e) => {
-                          const updated = [...questionForm.choices];
-                          updated[cIdx] = e.target.value;
-                          setQuestionForm({ ...questionForm, choices: updated });
-                        }}
-                        placeholder={`พิมพ์รายละเอียดตัวเลือกที่ ${cIdx + 1}`}
-                        className="flex-grow px-3 py-1.5 bg-white border border-slate-300 rounded text-xs font-medium focus:outline-none"
-                      />
+                    <div key={cIdx} className="space-y-1.5 p-3 bg-white border border-slate-200 rounded-lg shadow-2xs">
+                      <div className="flex gap-2 items-center">
+                        <span className="w-16 shrink-0 text-slate-500 text-center font-bold">ตัวเลือก {['ก', 'ข', 'ค', 'ง', 'จ'][cIdx]}</span>
+                        <input
+                          type="text"
+                          value={choiceText}
+                          id={`form-q-choice-${cIdx}`}
+                          onChange={(e) => {
+                            const updated = [...questionForm.choices];
+                            updated[cIdx] = e.target.value;
+                            setQuestionForm({ ...questionForm, choices: updated });
+                          }}
+                          onFocus={() => setFocusedInputId(`form-q-choice-${cIdx}`)}
+                          placeholder={`พิมพ์รายละเอียดตัวเลือกที่ ${cIdx + 1}`}
+                          className="flex-grow px-3 py-1.5 bg-white border border-slate-300 rounded text-xs font-semibold focus:outline-none"
+                        />
+                        <div className="relative shrink-0">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id={`file-upload-choice-${cIdx}`}
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  showMsg('กำลังอัปโหลดรูปภาพตัวเลือก...', 'info');
+                                  const uploadedUrl = await handleUploadImageFile(file);
+                                  const updatedImages = [...(questionForm.choiceImages || ['', '', '', ''])];
+                                  updatedImages[cIdx] = uploadedUrl;
+                                  setQuestionForm({ ...questionForm, choiceImages: updatedImages });
+                                  showMsg('อัปโหลดรูปภาพตัวเลือกสำเร็จ!', 'success');
+                                } catch (err) {
+                                  showMsg('อัปโหลดล้มเหลว: ' + (err as Error).message, 'error');
+                                }
+                              }
+                            }}
+                            className="hidden"
+                          />
+                          <label
+                            htmlFor={`file-upload-choice-${cIdx}`}
+                            className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1 border border-slate-300 shrink-0"
+                          >
+                            📷 อัปรูป
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Choice Live math preview */}
+                      {choiceText && (
+                        <div className="ml-16 mt-1 bg-slate-50/50 p-1.5 border border-slate-200 rounded text-[10px] flex items-center gap-2">
+                          <span className="text-slate-400 font-bold shrink-0">พรีวิวคณิตศาสตร์:</span>
+                          <span className="font-semibold text-slate-800">
+                            <MathRenderer text={choiceText} />
+                          </span>
+                        </div>
+                      )}
+
+                      {questionForm.choiceImages?.[cIdx] && (
+                        <div className="ml-16 flex items-center gap-3 bg-slate-50 p-2 rounded border border-slate-200 max-w-md">
+                          <img
+                            src={questionForm.choiceImages[cIdx]}
+                            alt={`รูปตัวเลือก ${['ก', 'ข', 'ค', 'ง', 'จ'][cIdx]}`}
+                            className="h-12 object-contain rounded border bg-white"
+                          />
+                          <div className="flex-grow text-[10px] font-mono truncate text-slate-400">
+                            {questionForm.choiceImages[cIdx]}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updatedImages = [...(questionForm.choiceImages || ['', '', '', ''])];
+                              updatedImages[cIdx] = '';
+                              setQuestionForm({ ...questionForm, choiceImages: updatedImages });
+                            }}
+                            className="p-1 text-red-500 hover:bg-red-50 rounded"
+                            title="ลบรูปภาพนี้"
+                          >
+                            ❌
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
 
@@ -1513,11 +2148,15 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                       id="btn-remove-choice"
                       onClick={() => {
                         if (questionForm.choices.length > 4) {
-                          setQuestionForm({ ...questionForm, choices: questionForm.choices.slice(0, -1) });
+                          setQuestionForm({
+                            ...questionForm,
+                            choices: questionForm.choices.slice(0, -1),
+                            choiceImages: (questionForm.choiceImages || ['', '', '', '']).slice(0, -1)
+                          });
                         }
                       }}
                       disabled={questionForm.choices.length <= 4}
-                      className="px-2 py-1 bg-red-100 text-red-700 rounded text-[10px] font-bold disabled:opacity-40"
+                      className="px-2 py-1 bg-red-100 text-red-700 rounded text-[10px] font-bold disabled:opacity-40 cursor-pointer"
                     >
                       - ลบตัวเลือก จ
                     </button>
@@ -1526,11 +2165,15 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                       id="btn-add-choice"
                       onClick={() => {
                         if (questionForm.choices.length < 5) {
-                          setQuestionForm({ ...questionForm, choices: [...questionForm.choices, ''] });
+                          setQuestionForm({
+                            ...questionForm,
+                            choices: [...questionForm.choices, ''],
+                            choiceImages: [...(questionForm.choiceImages || ['', '', '', '']), '']
+                          });
                         }
                       }}
                       disabled={questionForm.choices.length >= 5}
-                      className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-[10px] font-bold disabled:opacity-40"
+                      className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-[10px] font-bold disabled:opacity-40 cursor-pointer"
                     >
                       + เพิ่มตัวเลือก จ (5 ตัวเลือก)
                     </button>
@@ -1545,9 +2188,20 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   value={questionForm.correctAnswer}
                   id="form-q-ans"
                   onChange={(e) => setQuestionForm({ ...questionForm, correctAnswer: e.target.value })}
+                  onFocus={() => setFocusedInputId('form-q-ans')}
                   placeholder={questionForm.type === 'multiple-choice' ? 'พิมพ์ข้อความตัวเลือกที่ถูกต้องเป๊ะๆ (เช่น 30 หรือ ตารางเซนติเมตร)' : 'พิมพ์เฉลยตัวเลข'}
                   className="w-full px-3 py-2 bg-red-50/50 border border-red-200 rounded focus:outline-none focus:ring-1 focus:ring-red-500 font-medium"
                 />
+
+                {/* Correct Answer Live math preview */}
+                {questionForm.correctAnswer && (
+                  <div className="mt-1 bg-red-50/20 p-2 border border-red-200/50 rounded text-xs flex items-center gap-2">
+                    <span className="text-red-500 font-bold shrink-0">พรีวิวเฉลยคณิตศาสตร์:</span>
+                    <span className="font-semibold text-slate-800">
+                      <MathRenderer text={questionForm.correctAnswer} />
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-2.5 pt-4 border-t border-slate-100">
@@ -1641,6 +2295,16 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           const currentAns = gradingForm.editedMultipleChoiceAnswers?.[q.id] || '';
                           const isCorrect = currentAns.toString().trim() === q.correctAnswer.toString().trim();
 
+                          // Find which letter corresponds to the correctAnswer
+                          const correctIdx = q.choices ? q.choices.indexOf(q.correctAnswer) : -1;
+                          const correctLetter = correctIdx !== -1 ? ['ก', 'ข', 'ค', 'ง', 'จ'][correctIdx] : '';
+                          const correctLabel = correctLetter ? `${correctLetter}. ${q.correctAnswer}` : q.correctAnswer;
+
+                          // Find which letter corresponds to the originalAnswer
+                          const originalIdx = q.choices ? q.choices.indexOf(originalAns) : -1;
+                          const originalLetter = originalIdx !== -1 ? ['ก', 'ข', 'ค', 'ง', 'จ'][originalIdx] : '';
+                          const originalLabel = originalLetter ? `${originalLetter}. ${originalAns}` : (originalAns || '(ไม่ได้ตอบ)');
+
                           return (
                             <div key={q.id} className="p-2.5 rounded bg-slate-50 border border-slate-200 flex flex-col justify-between gap-1 text-[11px]">
                               <div className="flex justify-between items-start">
@@ -1649,8 +2313,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                                   {isCorrect ? 'ถูกต้อง' : 'ผิด'}
                                 </span>
                               </div>
-                              <p className="text-[10px] text-blue-800 font-semibold">เฉลยคีย์หลัก: {q.correctAnswer}</p>
-                              <p className="text-[10px] text-slate-400">คำตอบแรกเริ่มที่นักเรียนส่ง: <span className="font-bold font-mono text-slate-600">"{originalAns || '(ไม่ได้ตอบ)'}"</span></p>
+                              <p className="text-[10px] text-blue-800 font-bold bg-blue-50/50 p-1 rounded border border-blue-100/40">เฉลยคีย์หลัก: {correctLabel}</p>
+                              <p className="text-[10px] text-slate-400">คำตอบแรกเริ่มที่นักเรียนส่ง: <span className="font-bold font-mono text-slate-600">"{originalLabel}"</span></p>
                               <div className="flex items-center gap-1.5 mt-1">
                                 <span className="text-[10px] text-slate-500 shrink-0 font-bold">แก้ไขคำตอบปัจจุบัน:</span>
                                 <select
@@ -1663,14 +2327,22 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                                       editedMultipleChoiceAnswers: updated
                                     }));
                                   }}
-                                  className="text-[11px] px-1.5 py-0.5 bg-white border border-slate-300 rounded font-bold focus:outline-none cursor-pointer"
+                                  className="text-[11px] px-1.5 py-0.5 bg-white border border-slate-300 rounded font-bold focus:outline-none cursor-pointer max-w-[160px]"
                                 >
                                   <option value="">ไม่ได้ตอบ</option>
-                                  <option value="ก">ก</option>
-                                  <option value="ข">ข</option>
-                                  <option value="ค">ค</option>
-                                  <option value="ง">ง</option>
-                                  {q.choices?.[4] && <option value="จ">จ</option>}
+                                  {q.choices?.map((choiceText, cIdx) => {
+                                    const letter = ['ก', 'ข', 'ค', 'ง', 'จ'][cIdx];
+                                    return (
+                                      <option key={cIdx} value={choiceText}>
+                                        {letter}. {choiceText}
+                                      </option>
+                                    );
+                                  })}
+                                  <option value="ก">ก (เลือกคีย์พยัญชนะ)</option>
+                                  <option value="ข">ข (เลือกคีย์พยัญชนะ)</option>
+                                  <option value="ค">ค (เลือกคีย์พยัญชนะ)</option>
+                                  <option value="ง">ง (เลือกคีย์พยัญชนะ)</option>
+                                  {q.choices?.[4] && <option value="จ">จ (เลือกคีย์พยัญชนะ)</option>}
                                 </select>
                               </div>
                             </div>
@@ -1886,6 +2558,10 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   setDeleteConfirmInfo(null);
                   if (type === 'student') {
                     await proceedDeleteStudent(id);
+                  } else if (type === 'bulk-questions') {
+                    await proceedBulkDeleteQuestions();
+                  } else if (type === 'submission') {
+                    await proceedDeleteSubmission(id);
                   } else {
                     await proceedDeleteQuestion(id);
                   }

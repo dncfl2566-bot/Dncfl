@@ -1,0 +1,6 @@
+{
+  "name": "Math Exam System",
+  "description": "ระบบเข้าระบบทำข้อสอบวิชาคณิตศาสตร์ที่มาพร้อมระบบจับเวลา ระบบป้องกันการทุจริต และระบบแอดมินสำหรับตรวจข้อสอบและจัดการคลังข้อสอบ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

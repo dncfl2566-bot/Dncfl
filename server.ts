@@ -9,7 +9,7 @@ import { Student, Question, Submission, SystemState } from "./src/types";
 import http from "http";
 import https from "https";
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const DB_FILE = path.join(process.cwd(), "db.json");
 
 // Parse CSV content into Student[]
@@ -618,9 +618,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 }
 
 startServer();

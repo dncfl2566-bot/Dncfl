@@ -204,6 +204,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       if (studentsData.success) setStudents(studentsData.students);
       if (questionsData.success) setQuestions(questionsData.questions);
       if (submissionsData.success) setSubmissions(submissionsData.submissions);
+      // เรียกใช้เพื่อโหลดข้อมูลสถานะการเปิดสอบด้วย
+      fetchExamSettings();
     } catch (err) {
       showMsg('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เพื่อโหลดข้อมูลได้', 'error');
     } finally {

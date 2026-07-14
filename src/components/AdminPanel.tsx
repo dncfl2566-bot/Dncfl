@@ -37,7 +37,7 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ onLogout }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'students' | 'questions' | 'submissions' | 'summary'>('submissions');
+  const [activeTab, setActiveTab] = useState<'students' | 'questions' | 'submissions' | 'summary' | 'exam-settings'>('submissions');
   
   // Data lists
   const [students, setStudents] = useState<Student[]>([]);

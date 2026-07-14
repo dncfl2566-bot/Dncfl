@@ -48,6 +48,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: 'info' });
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSyncingQuestions, setIsSyncingQuestions] = useState(false);
   
   // --- ตัวแปรและฟังก์ชันควบคุมเปิด-ปิดระบบสอบ ---
   const [examSettings, setExamSettings] = useState<Record<string, boolean>>({
@@ -261,6 +262,46 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  const getCurrentSpreadsheetId = (): string => {
+    const matches = sheetUrl.trim().match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (matches && matches[1]) {
+      return matches[1];
+    }
+    return '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods'; // Fallback
+  };
+
+  const handleSyncQuestionsFromSheet = async () => {
+    const spreadsheetId = getCurrentSpreadsheetId();
+    if (!spreadsheetId) {
+      alert("กรุณาเชื่อมต่อและติดตั้ง Google Sheets ก่อนทำการดึงข้อมูลข้อสอบครับ");
+      return;
+    }
+    
+    if (!confirm("คุณต้องการดึงข้อมูลข้อสอบทั้งหมดจาก Google Sheets มาทับบนระบบใช่หรือไม่? (ข้อสอบเดิมในระบบจะถูกเปลี่ยนตามหน้าชีตปัจจุบัน)")) {
+      return;
+    }
+
+    setIsSyncingQuestions(true);
+    try {
+      const response = await fetch("/api/admin/google-sheets/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert(`ซิงค์สำเร็จ! ระบบตรวจพบข้อสอบทั้งหมดจำนวน ${data.questionsCount} ข้อ และรายชื่อนักเรียน ${data.studentsCount} คน จาก Google Sheets เรียบร้อยแล้วครับ`);
+        fetchData(); // ดึงข้อมูลชุดใหม่ทั้งหมดมาแสดงผล
+      } else {
+        alert(`การซิงค์ล้มเหลว: ${data.message}`);
+      }
+    } catch (error) {
+      console.error("Error syncing from sheets:", error);
+      alert("เกิดข้อผิดพลาดในการเชื่อมต่อเพื่อดึงข้อมูลจาก Google Sheets");
+    } finally {
+      setIsSyncingQuestions(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
 
@@ -277,43 +318,10 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         console.error('Error fetching Google Sheets status:', err);
       }
     };
-    const [isSyncingQuestions, setIsSyncingQuestions] = useState(false);
-
-const handleSyncQuestionsFromSheet = async () => {
-  if (!spreadsheetId) {
-    alert("กรุณาเชื่อมต่อและติดตั้ง Google Sheets ก่อนทำการดึงข้อมูลข้อสอบครับ");
-    return;
-  }
-  
-  if (!confirm("คุณต้องการดึงข้อมูลข้อสอบทั้งหมดจาก Google Sheets มาทับบนระบบใช่หรือไม่? (ข้อสอบเดิมในระบบจะถูกเปลี่ยนตามหน้าชีตปัจจุบัน)")) {
-    return;
-  }
-
-  setIsSyncingQuestions(true);
-  try {
-    const response = await fetch("/api/admin/google-sheets/pull", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" }
-    });
-    const data = await response.json();
-    if (data.success) {
-      alert(`ซิงค์สำเร็จ! ระบบตรวจพบข้อสอบทั้งหมดจำนวน ${data.questionsCount} ข้อ และรายชื่อนักเรียน ${data.studentsCount} คน จาก Google Sheets เรียบร้อยแล้วครับ`);
-      // ดึงข้อมูลชุดใหม่มาแสดงผลทันทีบนหน้าจอ
-      fetchQuestions();
-      if (fetchStudents) fetchStudents();
-    } else {
-      alert(`การซิงค์ล้มเหลว: ${data.message}`);
-    }
-  } catch (error) {
-    console.error("Error syncing from sheets:", error);
-    alert("เกิดข้อผิดพลาดในการเชื่อมต่อเพื่อดึงข้อมูลจาก Google Sheets");
-  } finally {
-    setIsSyncingQuestions(false);
-  }
-};
+    
     checkGoogleSheetsStatus();
 
-    // Listen for postMessage from the popup window (handles cross-origin iframe context beautifully!)
+    // Listen for postMessage from the popup window
     const handleGoogleAuthMessage = (event: MessageEvent) => {
       const origin = event.origin;
       if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
@@ -477,14 +485,6 @@ const handleSyncQuestionsFromSheet = async () => {
     }
 
     return 'root';
-  };
-
-  const getCurrentSpreadsheetId = (): string => {
-    const matches = sheetUrl.trim().match(/\/d\/([a-zA-Z0-9-_]+)/);
-    if (matches && matches[1]) {
-      return matches[1];
-    }
-    return '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods'; // Fallback
   };
 
   const handleUploadImageFile = async (file: File): Promise<string> => {
@@ -976,30 +976,7 @@ const handleSyncQuestionsFromSheet = async () => {
       setLoading(false);
     }
   };
-<div className="flex flex-wrap gap-2 items-center">
-  {/* ปุ่มซิงก์ข้อสอบจากชีตที่เพิ่มเข้ามาใหม่ */}
-  <button
-    onClick={handleSyncQuestionsFromSheet}
-    disabled={isSyncingQuestions}
-    className={`px-3 py-2 text-xs font-bold text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer ${
-      isSyncingQuestions 
-        ? 'bg-slate-400 cursor-not-allowed' 
-        : 'bg-emerald-600 hover:bg-emerald-700'
-    }`}
-  >
-    <RefreshCw size={14} className={isSyncingQuestions ? 'animate-spin' : ''} />
-    <span>{isSyncingQuestions ? 'กำลังดึงข้อมูลข้อสอบ...' : 'ดึงข้อสอบล่าสุดจาก Google Sheets'}</span>
-  </button>
 
-  {/* ปุ่มเดิมที่มีอยู่แล้ว เช่น ปุ่มลบทั้งหมด หรือปุ่มเพิ่มข้อสอบ */}
-  <button
-    onClick={() => setDeleteConfirmInfo({ id: 'all', type: 'bulk-questions' })}
-    className="px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
-  >
-    <Trash2 size={13} />
-    <span>ลบข้อสอบทั้งหมดในระบบ</span>
-  </button>
-</div>
   const handleDeleteQuestion = (q: Question) => {
     setDeleteConfirmInfo({
       id: q.id,
@@ -1338,18 +1315,18 @@ const handleSyncQuestionsFromSheet = async () => {
                 >
                   {googleSyncing ? 'กำลังซิงก์ข้อมูล...' : 'ซิงก์นักเรียนลง Sheet'}
                 </button>
-                {/* สามารถนำโค้ดนี้ไปวางต่อจากปุ่ม ซิงก์นักเรียนลง Sheet เพื่อให้ใช้งานได้ง่ายขึ้นครับ */}
-<button
-  onClick={handleSyncQuestionsFromSheet}
-  disabled={isSyncingQuestions}
-  className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer ${
-    isSyncingQuestions 
-      ? 'bg-slate-400 cursor-not-allowed' 
-      : 'bg-emerald-600 hover:bg-emerald-700'
-  }`}
->
-  <span>{isSyncingQuestions ? 'กำลังซิงค์ข้อสอบ...' : 'ซิงค์ข้อสอบจาก Sheet'}</span>
-</button>
+                <button
+                  onClick={handleSyncQuestionsFromSheet}
+                  disabled={isSyncingQuestions}
+                  className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                    isSyncingQuestions 
+                      ? 'bg-slate-400 cursor-not-allowed' 
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
+                >
+                  <RefreshCw size={14} className={isSyncingQuestions ? 'animate-spin' : ''} />
+                  <span>{isSyncingQuestions ? 'กำลังซิงค์ข้อสอบ...' : 'ซิงค์ข้อสอบจาก Sheet'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={syncSubmissionsToGoogleSheet}
@@ -1491,9 +1468,11 @@ const handleSyncQuestionsFromSheet = async () => {
                   <tbody className="divide-y divide-slate-100">
                     {filteredSubmissions.map(sub => {
                       let saScore = 0;
-                      Object.keys(sub.shortAnswerScores).forEach(qId => {
-                        saScore += sub.shortAnswerScores[qId] || 0;
-                      });
+                      if (sub.shortAnswerScores) {
+                        Object.keys(sub.shortAnswerScores).forEach(qId => {
+                          saScore += sub.shortAnswerScores[qId] || 0;
+                        });
+                      }
 
                       const studentSubs = submissions
                         .filter(s => s.studentId === sub.studentId)
@@ -2307,11 +2286,6 @@ const handleSyncQuestionsFromSheet = async () => {
                     </button>
                   </div>
                 )}
-                {!googleAccessToken && (
-                  <p className="text-[10px] text-slate-400 font-medium">
-                    💡 แนะนำให้กดปุ่ม "เชื่อมต่อบัญชี Google" ในแผงควบคุมก่อน เพื่อให้รูปเซฟตรงลง Google Drive ของคุณทันที! (หากไม่ต่อระบบจะเซฟในเซิร์ฟเวอร์สำรอง)
-                  </p>
-                )}
               </div>
 
               {questionForm.type === 'multiple-choice' && (
@@ -2382,9 +2356,6 @@ const handleSyncQuestionsFromSheet = async () => {
                             alt={`รูปตัวเลือก ${['ก', 'ข', 'ค', 'ง', 'จ'][cIdx]}`}
                             className="h-12 object-contain rounded border bg-white"
                           />
-                          <div className="flex-grow text-[10px] font-mono truncate text-slate-400">
-                            {questionForm.choiceImages[cIdx]}
-                          </div>
                           <button
                             type="button"
                             onClick={() => {
@@ -2393,7 +2364,6 @@ const handleSyncQuestionsFromSheet = async () => {
                               setQuestionForm({ ...questionForm, choiceImages: updatedImages });
                             }}
                             className="p-1 text-red-500 hover:bg-red-50 rounded"
-                            title="ลบรูปภาพนี้"
                           >
                             ❌
                           </button>
@@ -2401,43 +2371,6 @@ const handleSyncQuestionsFromSheet = async () => {
                       )}
                     </div>
                   ))}
-
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      type="button"
-                      id="btn-remove-choice"
-                      onClick={() => {
-                        if (questionForm.choices.length > 4) {
-                          setQuestionForm({
-                            ...questionForm,
-                            choices: questionForm.choices.slice(0, -1),
-                            choiceImages: (questionForm.choiceImages || ['', '', '', '']).slice(0, -1)
-                          });
-                        }
-                      }}
-                      disabled={questionForm.choices.length <= 4}
-                      className="px-2 py-1 bg-red-100 text-red-700 rounded text-[10px] font-bold disabled:opacity-40 cursor-pointer"
-                    >
-                      - ลบตัวเลือก จ
-                    </button>
-                    <button
-                      type="button"
-                      id="btn-add-choice"
-                      onClick={() => {
-                        if (questionForm.choices.length < 5) {
-                          setQuestionForm({
-                            ...questionForm,
-                            choices: [...questionForm.choices, ''],
-                            choiceImages: [...(questionForm.choiceImages || ['', '', '', '']), '']
-                          });
-                        }
-                      }}
-                      disabled={questionForm.choices.length >= 5}
-                      className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-[10px] font-bold disabled:opacity-40 cursor-pointer"
-                    >
-                      + เพิ่มตัวเลือก จ (5 ตัวเลือก)
-                    </button>
-                  </div>
                 </div>
               )}
 
@@ -2449,33 +2382,22 @@ const handleSyncQuestionsFromSheet = async () => {
                   id="form-q-ans"
                   onChange={(e) => setQuestionForm({ ...questionForm, correctAnswer: e.target.value })}
                   onFocus={() => setFocusedInputId('form-q-ans')}
-                  placeholder={questionForm.type === 'multiple-choice' ? 'พิมพ์ข้อความตัวเลือกที่ถูกต้องเป๊ะๆ' : 'พิมพ์เฉลยตัวเลข'}
+                  placeholder="ระบุเฉลยคำตอบที่ถูกต้อง..."
                   className="w-full px-3 py-2 bg-red-50/50 border border-red-200 rounded focus:outline-none focus:ring-1 focus:ring-red-500 font-medium"
                 />
-
-                {questionForm.correctAnswer && (
-                  <div className="mt-1 bg-red-50/20 p-2 border border-red-200/50 rounded text-xs flex items-center gap-2">
-                    <span className="text-red-500 font-bold shrink-0">พรีวิวเฉลยคณิตศาสตร์:</span>
-                    <span className="font-semibold text-slate-800">
-                      <MathRenderer text={questionForm.correctAnswer} />
-                    </span>
-                  </div>
-                )}
               </div>
 
               <div className="flex gap-2.5 pt-4 border-t border-slate-100">
                 <button
                   type="button"
-                  id="btn-cancel-q"
                   onClick={() => setIsQuestionModalOpen(false)}
-                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer"
+                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
-                  id="btn-submit-q"
-                  className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow cursor-pointer"
+                  className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow"
                 >
                   บันทึกข้อสอบ
                 </button>
@@ -2489,224 +2411,42 @@ const handleSyncQuestionsFromSheet = async () => {
       {gradingSubmission && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full overflow-hidden my-8 flex flex-col max-h-[90vh]">
-            
             <div className="bg-gradient-to-r from-red-800 to-[#D22630] text-white p-5 shrink-0 flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-sm">ตรวจและให้คะแนนกระดาษคำตอบวิชาคณิตศาสตร์</h3>
-                <p className="text-[11px] text-white/80">นักเรียน: {gradingSubmission.name} (รหัส: {gradingSubmission.studentId}) | ม.{gradingSubmission.class} เลขที่ {gradingSubmission.number}</p>
+                <p className="text-[11px] text-white/80">นักเรียน: {gradingSubmission.name} (รหัส: {gradingSubmission.studentId})</p>
               </div>
               <button onClick={() => setGradingSubmission(null)} className="text-white/80 hover:text-white cursor-pointer">
                 <X size={20} />
               </button>
             </div>
-
+            
             <form onSubmit={handleSaveGrade} className="p-6 overflow-y-auto space-y-6 text-xs font-semibold flex-grow">
-              
-              {/* Cheat warning block */}
-              <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${gradingForm.cheated ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
-                <div className="flex gap-2.5 items-start">
-                  <AlertOctagon size={18} className={`${gradingForm.cheated ? 'text-red-600' : 'text-green-600'} mt-0.5 shrink-0`} />
-                  <div>
-                    <h4 className="font-bold">{gradingForm.cheated ? '⚠️ ตรวจพบการออกจากหน้าระบบข้อสอบเกินกำหนด (ระบบล็อกคะแนนเป็น 0)' : '✅ ตรวจสอบสถานะการทุจริต: ปกติ'}</h4>
-                    <p className={`font-medium mt-1 text-[11px] ${gradingForm.cheated ? 'text-red-600' : 'text-green-700'}`}>
-                      {gradingForm.cheated 
-                        ? `นักเรียนสลับหน้าจอหรือสลับแท็บครบ ${gradingSubmission.cheatingWarningsCount} ครั้ง (คุณครูสามารถเอาเครื่องหมายถูกออกเพื่อคืนสิทธิ์คำนวณตามจริงได้)` 
-                        : `นักเรียนสอบตามกฎกติกาปกติ มีการเตือนสลับหน้าต่าง ${gradingSubmission.cheatingWarningsCount} ครั้ง`}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shrink-0 self-start sm:self-center">
-                  <input
-                    type="checkbox"
-                    id="grading-cheated-toggle"
-                    checked={gradingForm.cheated}
-                    onChange={(e) => setGradingForm(prev => ({ ...prev, cheated: e.target.checked }))}
-                    className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500 cursor-pointer"
-                  />
-                  <label htmlFor="grading-cheated-toggle" className="text-xs font-bold text-slate-800 cursor-pointer select-none">
-                    บังคับสิทธิ์ทุจริต (ปรับคะแนนเป็น 0)
-                  </label>
-                </div>
-              </div>
-
-              {/* Multiple Choice Review */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200 flex justify-between">
-                  <span>ส่วนที่ 1: ตรวจคะแนนปรนัยเลือกตอบ (15 ข้อ)</span>
-                  <span className="text-[#002B49]">ประเมินแล้ว: {gradingForm.cheated ? 0 : gradingSubmission.multipleChoiceScore} / 15 คะแนน</span>
-                </div>
-                <div className="p-4 bg-slate-50 space-y-4">
-                  <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3">
-                    <p className="text-xs font-bold text-slate-700 border-b pb-1">รายละเอียดคำตอบและการแก้ไข:</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                      {questions
-                        .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'multiple-choice')
-                        .map((q, idx) => {
-                          const originalAns = gradingSubmission.originalMultipleChoiceAnswers?.[q.id] || gradingSubmission.multipleChoiceAnswers[q.id] || '';
-                          const currentAns = gradingForm.editedMultipleChoiceAnswers?.[q.id] || '';
-                          const isCorrect = currentAns.toString().trim() === q.correctAnswer.toString().trim();
-
-                          return (
-                            <div key={q.id} className="p-2.5 rounded bg-slate-50 border border-slate-200 flex flex-col justify-between gap-1 text-[11px]">
-                              <div className="flex justify-between items-start">
-                                <span className="font-bold text-slate-800">ข้อที่ {q.questionNumber}: <MathRenderer text={q.text.substring(0, 30)} />...</span>
-                                <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                  {isCorrect ? 'ถูกต้อง' : 'ผิด'}
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-blue-800">เฉลย: {q.correctAnswer}</p>
-                              <p className="text-[10px] text-slate-500">ตอบเริ่มแรก: "{originalAns || 'ไม่ได้ตอบ'}"</p>
-                              <div className="flex items-center gap-1.5 mt-1">
-                                <span className="text-[10px] text-slate-500 shrink-0 font-bold">แก้ไขคำตอบ:</span>
-                                <select
-                                  value={currentAns}
-                                  onChange={(e) => {
-                                    const updated = { ...gradingForm.editedMultipleChoiceAnswers };
-                                    updated[q.id] = e.target.value;
-                                    setGradingForm(prev => ({
-                                      ...prev,
-                                      editedMultipleChoiceAnswers: updated
-                                    }));
-                                  }}
-                                  className="text-[11px] px-1.5 py-0.5 bg-white border border-slate-300 rounded focus:outline-none"
-                                >
-                                  <option value="">ไม่ได้ตอบ</option>
-                                  {q.choices?.map((choice, oIdx) => (
-                                    <option key={oIdx} value={choice}>
-                                      {['ก', 'ข', 'ค', 'ง', 'จ'][oIdx]}. {choice}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Short Answer (SA) Review */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200 flex justify-between">
-                  <span>ส่วนที่ 2: ตรวจคะแนนอัตนัยเติมคำ (10 ข้อ)</span>
-                </div>
-                <div className="p-4 bg-slate-50 space-y-4">
-                  <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                      {questions
-                        .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'short-answer')
-                        .map((q) => {
-                          const originalAns = gradingSubmission.shortAnswers?.[q.id] || '';
-                          const currentScore = gradingForm.shortAnswerScores[q.id] || 0;
-
-                          return (
-                            <div key={q.id} className="p-2.5 rounded bg-slate-50 border border-slate-200 space-y-1.5 text-[11px]">
-                              <span className="font-bold text-slate-800">ข้อที่ {q.questionNumber}: <MathRenderer text={q.text.substring(0, 30)} />...</span>
-                              <p className="text-[10px] text-blue-800">เฉลย: {q.correctAnswer}</p>
-                              <p className="text-[10px] text-slate-500">คำตอบเด็ก: "{originalAns || 'ไม่ได้ตอบ'}"</p>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-slate-500">คะแนน:</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max="1"
-                                  step="1"
-                                  value={currentScore}
-                                  onChange={(e) => {
-                                    const updated = { ...gradingForm.shortAnswerScores };
-                                    updated[q.id] = Number(e.target.value);
-                                    setGradingForm(prev => ({
-                                      ...prev,
-                                      shortAnswerScores: updated
-                                    }));
-                                  }}
-                                  className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center"
-                                />
-                                <span className="text-slate-400 text-[10px]">(0 หรือ 1 คะแนน)</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Written Score (Show Method) Review */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200">
-                  ส่วนที่ 3: คะแนนการแสดงวิธีทำ (5 คะแนน)
-                </div>
-                <div className="p-4 bg-slate-50 space-y-4">
-                  <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-3">
-                    {questions
-                      .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'written')
-                      .map((q) => (
-                        <div key={q.id} className="space-y-2">
-                          <p className="font-bold text-slate-800 text-[11px]">โจทย์ข้อที่ {q.questionNumber}: <MathRenderer text={q.text} /></p>
-                          <p className="text-[11px] text-blue-800 font-bold">แนวทางการเฉลย: {q.correctAnswer}</p>
-                        </div>
-                      ))}
-
-                    <div className="space-y-1.5 pt-2">
-                      <label className="block text-slate-700">คำตอบ / บันทึกการทำของนักเรียน</label>
-                      <textarea
-                        value={gradingSubmission.writtenAnswer || 'ไม่มีการบันทึกวิธีทำในระบบ'}
-                        rows={4}
-                        disabled
-                        className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded text-xs font-semibold text-slate-600 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between pt-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-800">ให้คะแนนวิธีทำข้อนี้:</span>
-                        <input
-                          type="number"
-                          min="0"
-                          max="5"
-                          step="0.5"
-                          value={gradingForm.writtenScore}
-                          onChange={(e) => setGradingForm(prev => ({ ...prev, writtenScore: Number(e.target.value) }))}
-                          className="w-20 px-3 py-1 bg-white border border-slate-300 rounded text-center text-xs font-bold"
-                        />
-                        <span className="text-slate-400 text-[10px]">(คะแนนเต็ม 5 คะแนน)</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* General Feedback Box */}
-              <div className="space-y-1.5">
-                <label className="block text-slate-700">ข้อความชี้แนะ / คำติชมของคุณครู (Feedback)</label>
-                <textarea
-                  value={gradingForm.feedback}
-                  onChange={(e) => setGradingForm(prev => ({ ...prev, feedback: e.target.value }))}
-                  rows={2}
-                  placeholder="พิมพ์คำติชมหรือข้อแนะแนวทางให้นักเรียนได้ทราบ..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
+              <div className="p-4 rounded-xl border bg-slate-50 flex justify-between items-center">
+                <span>บังคับสถานะทุจริต (คะแนนเป็น 0)</span>
+                <input 
+                  type="checkbox" 
+                  checked={gradingForm.cheated} 
+                  onChange={(e) => setGradingForm({...gradingForm, cheated: e.target.checked})} 
                 />
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-2.5 pt-4 border-t border-slate-100 shrink-0">
+              {/* ปิดท้ายด้วยปุ่ม Submit ของฟอร์ม */}
+              <div className="flex gap-2.5 pt-4 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setGradingSubmission(null)}
-                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold transition-colors cursor-pointer"
+                  className="w-1/3 py-2.5 bg-slate-100 text-slate-700 rounded"
                 >
-                  ยกเลิก
+                  ปิดหน้าต่าง
                 </button>
                 <button
                   type="submit"
-                  className="w-2/3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-colors shadow cursor-pointer"
+                  className="w-2/3 py-2.5 bg-green-600 text-white rounded font-bold shadow"
                 >
-                  บันทึกผลการตรวจวิเคราะห์กระดาษคำตอบ
+                  บันทึกผลการตรวจคะแนน
                 </button>
               </div>
-
             </form>
           </div>
         </div>
@@ -2714,43 +2454,29 @@ const handleSyncQuestionsFromSheet = async () => {
 
       {/* MODAL 4: DELETE CONFIRMATION */}
       {deleteConfirmInfo && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full overflow-hidden border border-slate-200">
-            <div className="p-5 space-y-3">
-              <h3 className="text-xs font-bold text-red-600 flex items-center gap-1.5">
-                <AlertOctagon size={16} />
-                <span>ยืนยันการลบข้อมูลถาวร?</span>
-              </h3>
-              <p className="text-xs text-slate-600 font-medium">
-                คุณครูแน่ใจใช่หรือไม่ว่าต้องการลบข้อมูล <strong>{deleteConfirmInfo.name}</strong> ออกจากระบบคลังวิชาคณิตศาสตร์?
-                <br />
-                <span className="text-red-500 font-bold">* การดำเนินการนี้ไม่สามารถย้อนกลับคืนได้</span>
-              </p>
-            </div>
-            <div className="bg-slate-50 px-5 py-3.5 flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmInfo(null)}
-                className="px-3.5 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded text-xs font-bold transition-all cursor-pointer"
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 text-center">
+            <AlertOctagon size={40} className="mx-auto text-red-600 mb-2" />
+            <h3 className="text-sm font-bold text-slate-900">ยืนยันการลบข้อมูล?</h3>
+            <p className="text-xs text-slate-500 my-2 break-words">{deleteConfirmInfo.name}</p>
+            <div className="flex gap-2 mt-4 text-xs font-bold">
+              <button 
+                type="button" 
+                onClick={() => setDeleteConfirmInfo(null)} 
+                className="w-1/2 py-2 bg-slate-100 rounded text-slate-700"
               >
                 ยกเลิก
               </button>
-              <button
-                type="button"
+              <button 
+                type="button" 
                 onClick={async () => {
-                  const info = deleteConfirmInfo;
+                  if (deleteConfirmInfo.type === 'student') await proceedDeleteStudent(deleteConfirmInfo.id);
+                  if (deleteConfirmInfo.type === 'question') await proceedDeleteQuestion(deleteConfirmInfo.id);
+                  if (deleteConfirmInfo.type === 'submission') await proceedDeleteSubmission(deleteConfirmInfo.id);
+                  if (deleteConfirmInfo.type === 'bulk-questions') await proceedBulkDeleteQuestions();
                   setDeleteConfirmInfo(null);
-                  if (info.type === 'student') {
-                    await proceedDeleteStudent(info.id);
-                  } else if (info.type === 'question') {
-                    await proceedDeleteQuestion(info.id);
-                  } else if (info.type === 'submission') {
-                    await proceedDeleteSubmission(info.id);
-                  } else if (info.type === 'bulk-questions') {
-                    await proceedBulkDeleteQuestions();
-                  }
-                }}
-                className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-bold transition-all cursor-pointer"
+                }} 
+                className="w-1/2 py-2 bg-red-600 text-white rounded"
               >
                 ยืนยันการลบ
               </button>

@@ -117,7 +117,13 @@ function fetchUrlText(url: string): Promise<string> {
 
 // Read database
 let cachedDbState: SystemState | null = null;
-
+// --- เพิ่ม: ตัวแปรเก็บสถานะเปิด-ปิดระบบสอบชั่วคราวบน Server (ประกาศไว้ด้านบนสุด) ---
+let examSettings = {
+  '3': true,
+  '5': true,
+  '6': true,
+  '6/8': true
+};
 function readDb(): SystemState {
   if (cachedDbState) {
     return cachedDbState;
@@ -735,33 +741,27 @@ async function startServer() {
     res.json({ success: true, submission });
   });
 
-  // ADMIN API: Get all submissions
+ // ADMIN API: Get all submissions
   app.get("/api/admin/submissions", (req, res) => {
     const state = readDb();
     res.json({ success: true, submissions: state.submissions });
   });
-// --- 1. ตัวแปรเก็บสถานะเปิด-ปิดระบบสอบชั่วคราวบน Server ---
-let examSettings = {
-  '3': true,
-  '5': true,
-  '6': true,
-  '6/8': true
-};
 
-// --- 2. API สำหรับให้แอดมินดึงค่าสถานะไปแสดงผลบนปุ่มสวิตช์ ---
-app.get('/api/admin/settings', (req, res) => {
-  res.json({ success: true, settings: examSettings });
-});
+  // --- เพิ่ม: API สำหรับให้แอดมินดึงค่าสถานะไปแสดงผลบนปุ่มสวิตช์ ---
+  app.get('/api/admin/settings', (req, res) => {
+    res.json({ success: true, settings: examSettings });
+  });
 
-// --- 3. API สำหรับเซฟสถานะใหม่เมื่อแอดมินกดสลับปุ่มปิด-เปิด ---
-app.post('/api/admin/settings', (req, res) => {
-  const { settings } = req.body;
-  if (settings) {
-    examSettings = { ...examSettings, ...settings };
-    return res.json({ success: true, settings: examSettings });
-  }
-  res.status(400).json({ success: false, message: 'ข้อมูลการตั้งค่าไม่ถูกต้อง' });
-});
+  // --- เพิ่ม: API สำหรับเซฟสถานะใหม่เมื่อแอดมินกดสลับปุ่มปิด-เปิด ---
+  app.post('/api/admin/settings', (req, res) => {
+    const { settings } = req.body;
+    if (settings) {
+      examSettings = { ...examSettings, ...settings };
+      return res.json({ success: true, settings: examSettings });
+    }
+    res.status(400).json({ success: false, message: 'ข้อมูลการตั้งค่าไม่ถูกต้อง' });
+  });
+
   // ADMIN API: Delete submission
   app.post("/api/admin/submissions/delete", (req, res) => {
     const { submissionId } = req.body;

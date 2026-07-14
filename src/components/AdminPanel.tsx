@@ -1014,28 +1014,26 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   };
 
   const proceedBulkDeleteQuestions = async () => {
-    if (selectedQuestionIds.length === 0) return;
-    setLoading(true);
-    try {
-      const res = await fetch('/api/admin/questions/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedQuestionIds })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setQuestions(questions.filter(q => !selectedQuestionIds.includes(q.id)));
-        setSelectedQuestionIds([]);
-        showMsg('ลบข้อสอบที่เลือกสำเร็จเรียบร้อยแล้ว!', 'success');
-      } else {
-        showMsg(data.message || 'เกิดข้อผิดพลาดในการลบข้อมูล', 'error');
-      }
-    } catch (err) {
-      showMsg('ข้อผิดพลาดในการเชื่อมต่อ', 'error');
-    } finally {
-      setLoading(false);
+  setLoading(true);
+  try {
+    const res = await fetch('/api/admin/questions/clear-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (data.success) {
+      setQuestions([]); // ล้างข้อสอบในหน้าจอออกทั้งหมด
+      setSelectedQuestionIds([]); // ล้างรายการที่เลือกค้างไว้
+      showMsg('ลบข้อสอบทั้งหมดออกจากระบบสำเร็จเรียบร้อยแล้ว', 'success');
+    } else {
+      showMsg(data.message || 'ลบไม่สำเร็จ', 'error');
     }
-  };
+  } catch (err) {
+    showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const getFilteredQuestions = () => {
     return questions.filter(q => {

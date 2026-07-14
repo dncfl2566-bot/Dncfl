@@ -345,6 +345,85 @@ async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Pr
   
   return result;
 }
+async function pullAllFromGoogleSheets(accessToken: string, spreadsheetId: string) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=Students!A:E&ranges=Questions!A:I&ranges=Submissions!A:W`;
+  
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  
+  if (!res.ok) {
+    throw new Error(`Google API respond error status: ${res.status}`);
+  }
+  
+  const data = await res.json();
+  const valueRanges = data.valueRanges || [];
+  
+  const studentRows = valueRanges[0]?.values || [];
+  const questionRows = valueRanges[1]?.values || [];
+  const submissionRows = valueRanges[2]?.values || []; // ดึงข้อมูล Submissions
+  
+  const state = readDb();
+  
+  if (studentRows.length > 1) {
+    state.students = studentRows.slice(1).map((row: any) => ({
+      id: row[0] || "",
+      name: row[1] || "",
+      classroom: row[2] || "",
+      number: row[3] || "",
+      password: row[4] || ""
+    }));
+  }
+  
+  if (questionRows.length > 1) {
+    state.questions = questionRows.slice(1).map((row: any) => {
+      let choicesArr = ["", "", "", "", ""];
+      try {
+        if (row[4]) {
+          const parsed = JSON.parse(row[4]);
+          if (Array.isArray(parsed)) choicesArr = parsed;
+        }
+      } catch(e) {
+        if (row[4]) choicesArr = row[4].split(",").map((c: string) => c.trim());
+      }
+      
+      return {
+        id: row[0] || "",
+        code: row[1] || "",
+        level: row[2] || "",
+        type: (row[3] || "multiple-choice") as any,
+        question: row[5] || "",
+        choices: choicesArr,
+        answer: row[6] || "0",
+        solution: row[7] || "",
+        image: row[8] || ""
+      };
+    });
+  }
+  
+  // 🔥 ดึงข้อมูลประวัติการสอบกลับเข้าระบบป้องกันการสูญหาย
+  if (submissionRows.length > 1) {
+    state.submissions = submissionRows.slice(1).map((row: any) => ({
+      id: row[0] || "",
+      studentId: row[1] || "",
+      studentName: row[2] || "",
+      classroom: row[3] || "",
+      score: Number(row[4] || 0),
+      totalQuestions: Number(row[5] || 0),
+      submittedAt: row[6] || "",
+      answers: row[7] ? JSON.parse(row[7]) : {},
+      cheatingAttempts: Number(row[8] || 0),
+      tabSwitches: Number(row[9] || 0),
+      faceOuts: Number(row[10] || 0),
+      isCheater: row[11] === 'true' || row[11] === true,
+      logs: row[12] ? JSON.parse(row[12]) : [],
+      writtenAnswers: row[13] ? JSON.parse(row[13]) : {}
+    }));
+  }
+  
+  writeDb(state);
+  return state;
+}
 
 function writeDb(state: SystemState) {
   cachedDbState = state;
@@ -685,13 +764,12 @@ app.post("/api/admin/google-sheets/pull", async (req, res) => {
     res.status(500).json({ success: false, message: err.message }); 
   }
 });
-
   app.post("/api/admin/questions/clear-all", (req, res) => {
   try {
     const state = readDb();
-    state.questions = []; // เคลียร์อาเรย์ข้อสอบให้ว่างเปล่า
+    state.questions = [];
     writeDb(state);
-    res.json({ success: true, message: "ลบข้อสอบทั้งหมดเรียบร้อยแล้ว" });
+    res.json({ success: true, message: "ลบข้อสอบทั้งหมดในระบบเรียบร้อยแล้ว" });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }

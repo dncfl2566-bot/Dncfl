@@ -52,4 +52,6 @@ export interface SystemState {
   submissions: Submission[];
   spreadsheetId?: string;
   googleAccessToken?: string;
+  examStatus?: Record<'3' | '5' | '6' | '6/8', 'open' | 'closed'>;
+  rosterSheetUrl?: string;
 }

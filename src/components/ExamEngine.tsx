@@ -37,6 +37,21 @@ function shuffleArray<T>(array: T[]): T[] {
   return arr;
 }
 
+// Convert Google Drive view URLs to direct usercontent CDN URLs to bypass CORS/Cookie restrictions
+export function getCleanImageUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (trimmed.includes('drive.google.com') || trimmed.includes('docs.google.com')) {
+    const matchD = trimmed.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    const matchId = trimmed.match(/id=([a-zA-Z0-9-_]+)/);
+    const fileId = (matchD && matchD[1]) || (matchId && matchId[1]);
+    if (fileId) {
+      return `https://lh3.googleusercontent.com/d/${fileId}`;
+    }
+  }
+  return trimmed;
+}
+
 interface ShuffledQuestion extends Question {
   shuffledChoicesList: string[];
 }
@@ -58,7 +73,20 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
   const [writtenAnswer, setWrittenAnswer] = useState<string>(''); // base64 canvas URL
 
   // Timer: 60 minutes = 3600 seconds
-  const [timeLeft, setTimeLeft] = useState(3600);
+  const [timeLeft, setTimeLeft] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`exam_time_left_${student.id}`);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return 3600;
+  });
   const [isExamCompleted, setIsExamCompleted] = useState(false);
 
   // Anti-cheating states
@@ -132,19 +160,35 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
   // Window Resize Monitoring (Maximize Enforcement & Split Screen Detection)
   useEffect(() => {
     const checkWindowSize = () => {
-      // Lower the threshold to standard mobile/tablet boundaries (width < 450px or height < 320px)
-      // to support small laptop viewports, zooms, and iframe previews beautifully.
-      const isSmall = window.innerWidth < 450 || window.innerHeight < 320;
+      // On mobile phones, we shouldn't force them to have width > 640px, but they should have at least 320px
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (screen && screen.width < 768);
+      const minWidth = isMobileDevice ? 320 : 640;
+      const minHeight = isMobileDevice ? 400 : 450;
+      const isSmall = window.innerWidth < minWidth || window.innerHeight < minHeight;
       setIsScreenResizedSmall(isSmall);
 
       // We bypass split-screen detection ONLY if embedded in an iframe (e.g. AI Studio Preview window)
       // so developers can test without being locked out.
       const isInIframe = window.self !== window.top;
       if (!isInIframe && screen && screen.width && screen.height) {
-        // Detect side-by-side split-screen (width ratio < 88%) or top-and-bottom split-screen (height ratio < 65%)
-        // This is extremely robust and covers iPad Split View, Slide Over, Samsung Multi Window, and desktop resizing!
-        const isWidthSplit = window.innerWidth < screen.width * 0.88;
-        const isHeightSplit = window.innerHeight < screen.height * 0.65;
+        const isMobileOrTabletDevice = isMobileDevice || screen.width < 1024;
+        
+        let isWidthSplit = false;
+        let isHeightSplit = false;
+
+        if (isMobileOrTabletDevice) {
+          // On mobile/tablets, only alert width split if the width is extremely narrow relative to the screen width (e.g., width < screen.width * 0.55)
+          // because portrait screens have window.innerWidth equal or almost equal to screen.width.
+          // In landscape split screen on tablets, window.innerWidth is less than 60% of screen.width.
+          isWidthSplit = window.innerWidth < screen.width * 0.55;
+          // We completely bypass height split-screen detection on mobile/tablets to avoid false alarms from mobile address bars and software keyboards.
+          isHeightSplit = false;
+        } else {
+          // On standard desktops, we can keep the robust checks
+          isWidthSplit = window.innerWidth < screen.width * 0.85;
+          isHeightSplit = window.innerHeight < screen.height * 0.55; // Lower height threshold to 55% to be safer against desktop bars/menus
+        }
+
         setIsSplitScreen(isWidthSplit || isHeightSplit);
       } else {
         setIsSplitScreen(false);
@@ -266,22 +310,33 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
   useEffect(() => {
     if (timeLeft <= 0) {
       // Time is up! Auto submit
+      try {
+        localStorage.removeItem(`exam_time_left_${student.id}`);
+      } catch (e) {}
       triggerAutoSubmit(false);
       return;
     }
+
+    try {
+      localStorage.setItem(`exam_time_left_${student.id}`, timeLeft.toString());
+    } catch (e) {}
 
     const interval = setInterval(() => {
       setTimeLeft((prev) => prev - 1);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [timeLeft]);
+  }, [timeLeft, student.id]);
 
   const triggerAutoSubmit = async (cheated = false) => {
     if (isSubmittingRef.current || isExamCompleted) return;
     isSubmittingRef.current = true;
     setIsExamCompleted(true);
     setSubmitError('');
+
+    try {
+      localStorage.removeItem(`exam_time_left_${student.id}`);
+    } catch (e) {}
 
     const timeTakenMin = Math.ceil((3600 - timeLeft) / 60);
 
@@ -599,7 +654,7 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
               {currentMcQ.image && (
                 <div className="mb-6 flex justify-center bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <img
-                    src={currentMcQ.image}
+                    src={getCleanImageUrl(currentMcQ.image)}
                     alt={`รูปภาพประกอบข้อที่ ${mcIndex + 1}`}
                     className="max-h-[300px] object-contain rounded-lg shadow-sm"
                     referrerPolicy="no-referrer"
@@ -648,7 +703,7 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
                         {choiceImg && (
                           <div className="mt-1 bg-white p-1 rounded border border-slate-100 flex justify-center max-h-[140px] overflow-hidden">
                             <img
-                              src={choiceImg}
+                              src={getCleanImageUrl(choiceImg)}
                               alt={`รูปประกอบตัวเลือก ${letterPrefix}`}
                               className="max-h-[120px] object-contain rounded"
                               referrerPolicy="no-referrer"

@@ -1,9 +1,10 @@
 {
-  "apiKey": "AIzaSyCMVGvejbgaEanFIOzkzGYOan_jh68y2DE",
-  "authDomain": "math-d44db.firebaseapp.com",
-  "projectId": "math-d44db",
-  "storageBucket": "math-d44db.firebasestorage.app",
-  "messagingSenderId": "658144391226",
-  "appId": "1:658144391226:web:9a57d7ca336efb8f2f0503",
-  "measurementId": "G-0T6GS56WF4"
+  "projectId": "gen-lang-client-0130064568",
+  "appId": "1:782706980303:web:82a1b914381e2f755c8eba",
+  "apiKey": "AIzaSyC8D7gl4WffhsMbqgIrOde_vDRNHFLMypw",
+  "authDomain": "gen-lang-client-0130064568.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0130064568.firebasestorage.app",
+  "messagingSenderId": "782706980303",
+  "measurementId": "",
+  "oAuthClientId": "782706980303-usu470fch6jospjtn4cvs57ldp2h5tbj.apps.googleusercontent.com"
 }

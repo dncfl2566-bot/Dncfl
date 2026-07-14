@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, 
-  Database,
+  Database, 
   CheckSquare, 
   Download, 
   Trash2, 
@@ -28,6 +28,21 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import MathRenderer from './MathRenderer';
 
+// Convert Google Drive view URLs to direct usercontent CDN URLs to bypass CORS/Cookie restrictions
+export function getCleanImageUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (trimmed.includes('drive.google.com') || trimmed.includes('docs.google.com')) {
+    const matchD = trimmed.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    const matchId = trimmed.match(/id=([a-zA-Z0-9-_]+)/);
+    const fileId = (matchD && matchD[1]) || (matchId && matchId[1]);
+    if (fileId) {
+      return `https://lh3.googleusercontent.com/d/${fileId}`;
+    }
+  }
+  return trimmed;
+}
+
 // Initialize Firebase App and Auth once
 const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const firebaseAuth = getAuth(firebaseApp);
@@ -37,7 +52,7 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ onLogout }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'students' | 'questions' | 'submissions' | 'summary' | 'exam-settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'students' | 'questions' | 'submissions' | 'summary'>('submissions');
   
   // Data lists
   const [students, setStudents] = useState<Student[]>([]);
@@ -48,83 +63,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: 'info' });
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSyncingQuestions, setIsSyncingQuestions] = useState(false);
-  
-  // --- ตัวแปรและฟังก์ชันควบคุมเปิด-ปิดระบบสอบ ---
-  const [examSettings, setExamSettings] = useState<Record<string, boolean>>({
-    '3': false,
-    '5': false,
-    '6': false,
-    '6/8': false
-  });
 
-  const fetchExamSettings = async () => {
-    try {
-      const res = await fetch('/api/admin/settings');
-      const data = await res.json();
-      if (data.success && data.settings) {
-        setExamSettings(data.settings);
-      }
-    } catch (err) {
-      console.error('Failed to fetch exam settings:', err);
-    }
-  };
-
-  // 🔥 ฟังก์ชันดึงข้อมูลจาก Google Sheets (Pull)
-  const handlePullFromSheet = async () => {
-    if (!confirm("⚠️ คำเตือน!\nคุณครูแน่ใจใช่หรือไม่ว่าต้องการดึงข้อมูลจาก Google Sheets?\nการทำงานนี้จะนำข้อสอบและรายชื่อนักเรียนจากในสเปรดชีตมา 'เขียนทับ' ข้อมูลปัจจุบันบนระบบทั้งหมด!")) return;
-    try {
-      const res = await fetch("/api/admin/google-sheets/pull", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        alert(`🎉 เชื่อมโยงสำเร็จ!\n- อัปเดตข้อสอบแล้ว: ${data.questionsCount} ข้อ\n- อัปเดตรายชื่อนักเรียนแล้ว: ${data.studentsCount} คน`);
-        window.location.reload(); // รีเฟรชหน้าจอเพื่อดึงข้อมูลใหม่มาแสดงผล
-      } else {
-        alert(`❌ ไม่สามารถดึงข้อมูลได้: ${data.message}`);
-      }
-    } catch (e) {
-      alert("❌ เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
-    }
-  };
-
-  // 🔥 ฟังก์ชันส่งข้อมูลขึ้น Google Sheets (Push)
-  const handlePushToSheet = async () => {
-    if (!confirm("คุณครูต้องการส่งข้อมูลข้อสอบและรายชื่อนักเรียนปัจจุบันขึ้นไปบันทึกบน Google Sheets ใช่หรือไม่?")) return;
-    try {
-      const res = await fetch("/api/admin/google-sheets/push-manual", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        alert(`🎉 บันทึกสำเร็จ!\n${data.message}`);
-      } else {
-        alert(`❌ เกิดข้อผิดพลาด: ${data.message}`);
-      }
-    } catch (e) {
-      alert("❌ เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
-    }
-  };
-  
-  const handleToggleExam = async (gradeLevel: string, isOpen: boolean) => {
-    const updatedSettings = { ...examSettings, [gradeLevel]: isOpen };
-    setExamSettings(updatedSettings);
-    try {
-      const res = await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings: updatedSettings })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(`บันทึกการตั้งค่าระบบสอบ ม.${gradeLevel} สำเร็จ`);
-      } else {
-        alert(data.message || 'บันทึกสถานะไม่สำเร็จ');
-        fetchExamSettings();
-      }
-    } catch (err) {
-      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
-      fetchExamSettings();
-    }
-  };
- 
   // Bulk Questions select state & ref
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [showAbsentModal, setShowAbsentModal] = useState(false);
@@ -137,6 +76,9 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ id: string, type: 'student' | 'question' | 'submission' | 'bulk-questions', name: string } | null>(null);
 
   const [sheetUrl, setSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0');
+  const [rosterSheetUrl, setRosterSheetUrl] = useState(() => {
+    return localStorage.getItem('google_roster_sheet_url') || 'https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0';
+  });
 
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
@@ -157,8 +99,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     questionNumber: 1,
     text: '',
     image: '',
-    choices: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
-    choiceImages: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
+    choices: ['', '', '', '', ''],
+    choiceImages: ['', '', '', '', ''],
     correctAnswer: ''
   });
 
@@ -216,30 +158,56 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   });
   const [googleUser, setGoogleUser] = useState<{ email?: string; name?: string; picture?: string } | null>(null);
   const [googleSyncing, setGoogleSyncing] = useState(false);
+  const [examStatuses, setExamStatuses] = useState<Record<'3' | '5' | '6' | '6/8', 'open' | 'closed'>>({
+    '3': 'closed',
+    '5': 'closed',
+    '6': 'closed',
+    '6/8': 'closed'
+  });
 
   // Fetch initial collections
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [studentsRes, questionsRes, submissionsRes] = await Promise.all([
+      const [studentsRes, questionsRes, submissionsRes, statusRes] = await Promise.all([
         fetch('/api/admin/students'),
         fetch('/api/admin/questions'),
-        fetch('/api/admin/submissions')
+        fetch('/api/admin/submissions'),
+        fetch('/api/admin/exam-status')
       ]);
 
       const studentsData = await studentsRes.json();
       const questionsData = await questionsRes.json();
       const submissionsData = await submissionsRes.json();
+      const statusData = await statusRes.json();
 
       if (studentsData.success) setStudents(studentsData.students);
       if (questionsData.success) setQuestions(questionsData.questions);
       if (submissionsData.success) setSubmissions(submissionsData.submissions);
-      // เรียกใช้เพื่อโหลดข้อมูลสถานะการเปิดสอบด้วย
-      fetchExamSettings();
+      if (statusData.success && statusData.examStatus) setExamStatuses(statusData.examStatus);
     } catch (err) {
       showMsg('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เพื่อโหลดข้อมูลได้', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleExamStatus = async (gradeLevel: '3' | '5' | '6' | '6/8') => {
+    try {
+      const res = await fetch('/api/admin/exam-status/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gradeLevel })
+      });
+      const data = await res.json();
+      if (data.success && data.examStatus) {
+        setExamStatuses(data.examStatus);
+        showMsg(data.message, 'success');
+      } else {
+        showMsg(data.message || 'ไม่สามารถสลับสถานะระบบทำข้อสอบได้', 'error');
+      }
+    } catch (err) {
+      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
     }
   };
 
@@ -255,50 +223,11 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         setSheetUrl(data.url);
         localStorage.setItem('google_spreadsheet_url', data.url);
         showMsg(`เชื่อมต่อ Google Sheet เพื่อซิงก์ข้อสอบ รายชื่อนักเรียน และผลคะแนนสอบแบบเรียลไทม์สำเร็จแล้ว!`, 'success');
+        // Fetch fresh data that might have been synced/merged from the Sheet
         fetchData();
       }
     } catch (err) {
       console.error('Error connecting Google Sheets on server:', err);
-    }
-  };
-
-  const getCurrentSpreadsheetId = (): string => {
-    const matches = sheetUrl.trim().match(/\/d\/([a-zA-Z0-9-_]+)/);
-    if (matches && matches[1]) {
-      return matches[1];
-    }
-    return '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods'; // Fallback
-  };
-
-  const handleSyncQuestionsFromSheet = async () => {
-    const spreadsheetId = getCurrentSpreadsheetId();
-    if (!spreadsheetId) {
-      alert("กรุณาเชื่อมต่อและติดตั้ง Google Sheets ก่อนทำการดึงข้อมูลข้อสอบครับ");
-      return;
-    }
-    
-    if (!confirm("คุณต้องการดึงข้อมูลข้อสอบทั้งหมดจาก Google Sheets มาทับบนระบบใช่หรือไม่? (ข้อสอบเดิมในระบบจะถูกเปลี่ยนตามหน้าชีตปัจจุบัน)")) {
-      return;
-    }
-
-    setIsSyncingQuestions(true);
-    try {
-      const response = await fetch("/api/admin/google-sheets/pull", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      const data = await response.json();
-      if (data.success) {
-        alert(`ซิงค์สำเร็จ! ระบบตรวจพบข้อสอบทั้งหมดจำนวน ${data.questionsCount} ข้อ และรายชื่อนักเรียน ${data.studentsCount} คน จาก Google Sheets เรียบร้อยแล้วครับ`);
-        fetchData(); // ดึงข้อมูลชุดใหม่ทั้งหมดมาแสดงผล
-      } else {
-        alert(`การซิงค์ล้มเหลว: ${data.message}`);
-      }
-    } catch (error) {
-      console.error("Error syncing from sheets:", error);
-      alert("เกิดข้อผิดพลาดในการเชื่อมต่อเพื่อดึงข้อมูลจาก Google Sheets");
-    } finally {
-      setIsSyncingQuestions(false);
     }
   };
 
@@ -310,21 +239,33 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       try {
         const res = await fetch('/api/admin/google-sheets/status');
         const data = await res.json();
-        if (data.success && data.url) {
-          setSheetUrl(data.url);
-          localStorage.setItem('google_spreadsheet_url', data.url);
+        if (data.success) {
+          if (data.url) {
+            setSheetUrl(data.url);
+            localStorage.setItem('google_spreadsheet_url', data.url);
+          }
+          if (data.rosterSheetUrl) {
+            setRosterSheetUrl(data.rosterSheetUrl);
+            localStorage.setItem('google_roster_sheet_url', data.rosterSheetUrl);
+          }
         }
       } catch (err) {
         console.error('Error fetching Google Sheets status:', err);
       }
     };
-    
     checkGoogleSheetsStatus();
 
-    // Listen for postMessage from the popup window
+    // Listen for postMessage from the popup window (handles cross-origin iframe context beautifully!)
     const handleGoogleAuthMessage = (event: MessageEvent) => {
       const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+      const isAllowedOrigin = 
+        origin.includes('localhost') || 
+        origin.endsWith('.run.app') || 
+        origin.endsWith('.render.com') || 
+        origin.endsWith('.onrender.com') || 
+        origin.endsWith('.github.io');
+
+      if (!isAllowedOrigin) {
         return;
       }
 
@@ -368,6 +309,27 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       window.removeEventListener('message', handleGoogleAuthMessage);
     };
   }, []);
+
+  const handleBidirectionalSync = async () => {
+    setGoogleSyncing(true);
+    try {
+      const res = await fetch('/api/admin/google-sheets/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (data.success) {
+        showMsg(data.message, 'success');
+        await fetchData();
+      } else {
+        showMsg(data.message || 'ซิงค์ข้อมูลไม่สำเร็จ', 'error');
+      }
+    } catch (err) {
+      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+    } finally {
+      setGoogleSyncing(false);
+    }
+  };
 
   const fetchGoogleProfile = async (token: string) => {
     try {
@@ -444,12 +406,27 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   };
 
   const getOrCreateDriveFolder = async (token: string): Promise<string> => {
+    // 1. Try to use the user's specified shared Google Drive folder first
+    const targetFolderId = '1EbKMnX8twSAStZxjJXidlv_1D5G5u6GR';
+    try {
+      const checkRes = await fetch(`https://www.googleapis.com/drive/v3/files/${targetFolderId}?fields=id`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (checkRes.ok) {
+        console.log('Successfully connected and verified shared Google Drive folder:', targetFolderId);
+        return targetFolderId;
+      }
+    } catch (e) {
+      console.error('Error verifying specified folder, trying custom fallback:', e);
+    }
+
     const savedFolderId = localStorage.getItem('google_drive_folder_id');
     if (savedFolderId) {
       return savedFolderId;
     }
 
     try {
+      // 2. Search for existing custom folder fallback
       const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='Math Exam Images' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
       const searchRes = await fetch(searchUrl, {
         headers: { Authorization: `Bearer ${token}` }
@@ -463,6 +440,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         }
       }
 
+      // 3. Create new custom folder fallback if not found
       const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
         method: 'POST',
         headers: {
@@ -484,9 +462,19 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       console.error('Error getting or creating Google Drive folder:', e);
     }
 
+    // Default fallback
     return 'root';
   };
 
+  const getCurrentSpreadsheetId = (): string => {
+    const matches = sheetUrl.trim().match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (matches && matches[1]) {
+      return matches[1];
+    }
+    return '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods'; // Fallback
+  };
+
+  // Upload image logic (Supports Google Drive Folder & Local backup)
   const handleUploadImageFile = async (file: File): Promise<string> => {
     if (googleAccessToken) {
       try {
@@ -513,6 +501,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           const fileData = await res.json();
           const fileId = fileData.id;
 
+          // Set anyone permissions to read image URL in exams
           await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
             method: 'POST',
             headers: {
@@ -532,6 +521,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       }
     }
 
+    // Local server upload fallback
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -559,16 +549,19 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     });
   };
 
+  // Sync Students to Google Sheet
   const syncStudentsToGoogleSheet = async (listToSync = students) => {
     if (!googleAccessToken) {
-      return;
+      return; // Skip if not logged in
     }
 
     setGoogleSyncing(true);
     try {
       const spreadsheetId = getCurrentSpreadsheetId();
+      
+      // Clear current contents of A:E
       const clearRange = 'Sheet1!A:E';
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
+      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${googleAccessToken}`,
@@ -576,6 +569,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         }
       });
 
+      // Prepare data
       const values = [
         ['รหัสนักเรียน (ID)', 'ชื่อ-นามสกุล', 'ชั้นเรียน', 'เลขที่', 'วันที่เพิ่มเข้าชีต']
       ];
@@ -591,7 +585,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
 
       const updateRange = 'Sheet1!A1';
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
+      const url = `https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
 
       const res = await fetch(url, {
         method: 'PUT',
@@ -616,6 +610,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  // Sync Submissions and Grades to Google Sheet
   const syncSubmissionsToGoogleSheet = async () => {
     if (!googleAccessToken) {
       showMsg('กรุณาลงชื่อเข้าใช้ Google เพื่อซิงก์ข้อมูลรายงานคะแนน', 'error');
@@ -625,8 +620,10 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     setGoogleSyncing(true);
     try {
       const spreadsheetId = getCurrentSpreadsheetId();
+      
+      // Try to create the 'รายงานคะแนนสอบ' sheet tab (errors if already exists, which we catch and ignore)
       try {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+        await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}:batchUpdate`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${googleAccessToken}`,
@@ -645,11 +642,12 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           })
         });
       } catch (err) {
-        // Ignored if sheet already exists
+        // Ignored
       }
 
+      // Clear existing content in 'รายงานคะแนนสอบ' A:K
       const clearRange = 'รายงานคะแนนสอบ!A:K';
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
+      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${googleAccessToken}`,
@@ -657,6 +655,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         }
       });
 
+      // Prepare data values
       const values = [
         [
           'รหัสนักเรียน',
@@ -702,7 +701,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
 
       const updateRange = 'รายงานคะแนนสอบ!A1';
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
+      const url = `https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
 
       const res = await fetch(url, {
         method: 'PUT',
@@ -727,6 +726,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  // Delete submission
   const handleDeleteSubmission = (subId: string, name: string) => {
     setDeleteConfirmInfo({
       id: subId,
@@ -762,9 +762,10 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     setTimeout(() => setMessage({ text: '', type: 'info' }), 6000);
   };
 
+  // Google Sheet fetcher API
   const handleFetchGoogleSheet = async () => {
-    if (!sheetUrl.trim()) {
-      showMsg('กรุณากรอกลิงก์ Google Sheet', 'error');
+    if (!rosterSheetUrl.trim()) {
+      showMsg('กรุณากรอกลิงก์ Google Sheet สำหรับนำรายชื่อนักเรียนเข้า', 'error');
       return;
     }
 
@@ -775,7 +776,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       const response = await fetch('/api/admin/students/fetch-sheet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sheetUrl: sheetUrl.trim() })
+        body: JSON.stringify({ sheetUrl: rosterSheetUrl.trim() })
       });
       const data = await response.json();
 
@@ -795,6 +796,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  // Student Save manual
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentForm.id.trim() || !studentForm.name.trim()) {
@@ -813,6 +815,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     if (editingStudent) {
       updatedList = updatedList.map(s => s.id === editingStudent.id ? newStudent : s);
     } else {
+      // Check if student id already exists
       if (students.some(s => s.id === newStudent.id)) {
         showMsg('รหัสนักเรียนนี้มีอยู่ในฐานข้อมูลแล้ว', 'error');
         return;
@@ -878,6 +881,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  // Question save
   const handleSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!questionForm.text.trim() || !questionForm.correctAnswer.trim()) {
@@ -962,6 +966,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
       const data = await res.json();
       if (data.success) {
+        // Refresh question list
         const refreshedRes = await fetch('/api/admin/questions');
         const refreshedData = await refreshedRes.json();
         if (refreshedData.success) setQuestions(refreshedData.questions);
@@ -1012,27 +1017,60 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       name: `ข้อสอบที่เลือกทั้งหมดจำนวน ${selectedQuestionIds.length} ข้อ`
     });
   };
-const proceedBulkDeleteQuestions = async () => {
-  setLoading(true);
-  try {
-    const res = await fetch('/api/admin/questions/clear-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+
+  const handleDeleteAllQuestions = () => {
+    setDeleteConfirmInfo({
+      id: 'all',
+      type: 'all-questions',
+      name: 'ข้อสอบทั้งหมดทุกระดับชั้นในระบบ'
     });
-    const data = await res.json();
-    if (data.success) {
-      setQuestions([]);
-      setSelectedQuestionIds([]);
-      showMsg('ลบข้อสอบทั้งหมดเรียบร้อยแล้ว', 'success');
-    } else {
-      showMsg(data.message || 'ลบไม่สำเร็จ', 'error');
+  };
+
+  const proceedBulkDeleteQuestions = async () => {
+    if (selectedQuestionIds.length === 0) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/questions/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedQuestionIds })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setQuestions(questions.filter(q => !selectedQuestionIds.includes(q.id)));
+        setSelectedQuestionIds([]);
+        showMsg('ลบข้อสอบที่เลือกสำเร็จเรียบร้อยแล้ว!', 'success');
+      } else {
+        showMsg(data.message || 'เกิดข้อผิดพลาดในการลบข้อมูล', 'error');
+      }
+    } catch (err) {
+      showMsg('ข้อผิดพลาดในการเชื่อมต่อ', 'error');
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ', 'error');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
+  const proceedDeleteAllQuestions = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/questions/all', {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        setQuestions([]);
+        setSelectedQuestionIds([]);
+        showMsg('ลบข้อสอบทั้งหมดออกจากระบบสำเร็จเรียบร้อยแล้ว!', 'success');
+      } else {
+        showMsg(data.message || 'เกิดข้อผิดพลาดในการลบข้อสอบทั้งหมด', 'error');
+      }
+    } catch (err) {
+      showMsg('เกิดข้อผิดพลาดในการติดต่อสื่อสารกับเซิร์ฟเวอร์', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getFilteredQuestions = () => {
     return questions.filter(q => {
       const s = searchQuery.toLowerCase().trim();
@@ -1069,6 +1107,7 @@ const proceedBulkDeleteQuestions = async () => {
     }
   };
 
+  // Grade save
   const handleSaveGrade = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!gradingSubmission) return;
@@ -1102,12 +1141,14 @@ const proceedBulkDeleteQuestions = async () => {
     }
   };
 
+  // Export to CSV helper
   const handleExportCSV = () => {
     if (submissions.length === 0) {
       showMsg('ไม่มีข้อมูลผลการสอบเพื่อส่งออกในขณะนี้', 'error');
       return;
     }
 
+    // Build headers
     const csvRows = [
       [
         'รหัสนักเรียน',
@@ -1126,7 +1167,9 @@ const proceedBulkDeleteQuestions = async () => {
       ].join(',')
     ];
 
+    // Add student results
     submissions.forEach(sub => {
+      // Calculate short answer sum
       let saSum = 0;
       Object.keys(sub.shortAnswerScores).forEach(qId => {
         saSum += sub.shortAnswerScores[qId] || 0;
@@ -1152,7 +1195,7 @@ const proceedBulkDeleteQuestions = async () => {
       ].join(','));
     });
 
-    const csvContent = "\uFEFF" + csvRows.join('\n');
+    const csvContent = "\uFEFF" + csvRows.join('\n'); // Add BOM for excel Thai font support
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1163,6 +1206,7 @@ const proceedBulkDeleteQuestions = async () => {
     document.body.removeChild(link);
   };
 
+  // Open Edit student form
   const openEditStudent = (s: Student) => {
     setEditingStudent(s);
     setStudentForm({
@@ -1185,8 +1229,17 @@ const proceedBulkDeleteQuestions = async () => {
     setIsStudentModalOpen(true);
   };
 
+  // Open edit question form
   const openEditQuestion = (q: Question) => {
     setEditingQuestion(q);
+    
+    // Ensure both choices and choiceImages always contain 5 items so Choice จ is fully initialized and editable
+    const choicesList = q.choices ? [...q.choices] : [];
+    while (choicesList.length < 5) choicesList.push('');
+    
+    const choiceImgList = q.choiceImages ? [...q.choiceImages] : [];
+    while (choiceImgList.length < 5) choiceImgList.push('');
+
     setQuestionForm({
       gradeLevel: q.gradeLevel,
       set: q.set,
@@ -1194,8 +1247,8 @@ const proceedBulkDeleteQuestions = async () => {
       questionNumber: q.questionNumber,
       text: q.text,
       image: q.image || '',
-      choices: q.choices ? [...q.choices] : ['', '', '', '', ''],
-      choiceImages: q.choiceImages ? [...q.choiceImages] : (q.choices ? q.choices.map(() => '') : ['', '', '', '', '']),
+      choices: choicesList,
+      choiceImages: choiceImgList,
       correctAnswer: q.correctAnswer
     });
     setIsQuestionModalOpen(true);
@@ -1210,13 +1263,14 @@ const proceedBulkDeleteQuestions = async () => {
       questionNumber: questions.length + 1,
       text: '',
       image: '',
-      choices: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
-      choiceImages: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
+      choices: ['', '', '', '', ''],
+      choiceImages: ['', '', '', '', ''],
       correctAnswer: ''
     });
     setIsQuestionModalOpen(true);
   };
 
+  // Open grading sheet
   const openGradingSheet = (sub: Submission) => {
     setGradingSubmission(sub);
     setGradingForm({
@@ -1229,6 +1283,7 @@ const proceedBulkDeleteQuestions = async () => {
     });
   };
 
+  // Filters for lists
   const filteredStudents = students.filter(s => 
     s.name.includes(searchQuery) || s.id.includes(searchQuery) || s.class.includes(searchQuery)
   );
@@ -1312,18 +1367,6 @@ const proceedBulkDeleteQuestions = async () => {
                   {googleSyncing ? 'กำลังซิงก์ข้อมูล...' : 'ซิงก์นักเรียนลง Sheet'}
                 </button>
                 <button
-                  onClick={handleSyncQuestionsFromSheet}
-                  disabled={isSyncingQuestions}
-                  className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                    isSyncingQuestions 
-                      ? 'bg-slate-400 cursor-not-allowed' 
-                      : 'bg-emerald-600 hover:bg-emerald-700'
-                  }`}
-                >
-                  <RefreshCw size={14} className={isSyncingQuestions ? 'animate-spin' : ''} />
-                  <span>{isSyncingQuestions ? 'กำลังซิงค์ข้อสอบ...' : 'ซิงค์ข้อสอบจาก Sheet'}</span>
-                </button>
-                <button
                   type="button"
                   onClick={syncSubmissionsToGoogleSheet}
                   disabled={googleSyncing}
@@ -1331,18 +1374,6 @@ const proceedBulkDeleteQuestions = async () => {
                 >
                   {googleSyncing ? 'กำลังซิงก์ข้อมูล...' : 'ซิงก์รายงานคะแนนลง Sheet'}
                 </button>
-                <button
-  type="button"
-  onClick={() => setDeleteConfirmInfo({ 
-    id: 'bulk', 
-    type: 'bulk-questions', 
-    name: 'ข้อสอบทั้งหมดในระบบ ทุกระดับชั้น' 
-  })}
-  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
->
-  <Trash2 size={13} />
-  <span>ลบข้อสอบทั้งหมด</span>
-</button>
                 <button
                   type="button"
                   onClick={handleGoogleLogout}
@@ -1363,9 +1394,107 @@ const proceedBulkDeleteQuestions = async () => {
           </div>
         </div>
 
+        {/* Exam Control & Bidirectional Sync Panel */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Card 1: Exam Control */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 bg-rose-100 text-rose-700 rounded-lg">
+                  <CheckSquare size={18} />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-800">ระบบเปิด-ปิดการเข้าทำข้อสอบ (ระดับวิชา)</h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">ควบคุมสิทธิ์การเข้าสู่ระบบเพื่อทำข้อสอบของนักเรียนแต่ละระดับชั้น</p>
+                </div>
+              </div>
+              
+              <div className="space-y-2.5 my-3">
+                {(['3', '5', '6', '6/8'] as const).map((level) => {
+                  const isOpen = examStatuses[level] === 'open';
+                  return (
+                    <div key={level} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg border border-slate-100 hover:bg-slate-100/50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-700">ระดับชั้น ม.{level === '6/8' ? '6/8' : level}</span>
+                        {isOpen ? (
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold rounded-full">เปิดระบบทำข้อสอบ</span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-slate-200 text-slate-600 border border-slate-300 text-[10px] font-bold rounded-full">ปิดการทำข้อสอบ</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleExamStatus(level)}
+                        className={`px-3 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer ${
+                          isOpen
+                            ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'
+                            : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                        }`}
+                      >
+                        {isOpen ? 'ปิดการสอบ' : 'เปิดการสอบ'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Bidirectional Sync Engine */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div className="flex flex-col h-full justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">
+                    <Database size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800">ระบบซิงค์สองทาง (Bidirectional Sync Engine)</h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">รวมและประสานข้อมูลให้ตรงกันระหว่างระบบเว็บและ Google Sheet</p>
+                  </div>
+                </div>
+                
+                <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-[11px] text-amber-800 leading-relaxed mb-4">
+                  <strong>คำแนะนำการใช้งาน:</strong>
+                  <ul className="list-disc list-inside space-y-1 mt-1 text-[11px]">
+                    <li>การเพิ่ม/ลบข้อสอบหรือรายชื่อในเว็บ ระบบจะบันทึกแบบเรียลไทม์เสมอ</li>
+                    <li>หากท่านเข้าไปแก้ไข เพิ่ม หรือลบข้อมูลใน Google Sheet โดยตรง กรุณากดปุ่ม <strong>"เริ่มทำการซิงค์สองทางแบบสมบูรณ์"</strong> เพื่อนำข้อมูลจากชีตเข้ามาอัปเดตและเขียนทับให้ตรงกันเสมอ 100%</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  disabled={!googleAccessToken || googleSyncing}
+                  onClick={handleBidirectionalSync}
+                  className="w-full py-3 bg-gradient-to-r from-blue-700 to-indigo-800 hover:from-blue-800 hover:to-indigo-900 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:cursor-not-allowed animate-pulse"
+                >
+                  {googleSyncing ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>กำลังประสานระบบซิงค์ข้อมูล...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Database size={15} />
+                      <span>🔄 เริ่มทำการซิงค์สองทางแบบสมบูรณ์ (Sync Sheets & Web)</span>
+                    </>
+                  )}
+                </button>
+                {!googleAccessToken && (
+                  <p className="text-center text-[10px] text-rose-500 font-semibold mt-1.5">
+                    *กรุณาเชื่อมต่อบัญชี Google ก่อนเปิดใช้งานปุ่มซิงค์สองทาง
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Tab Buttons & Search bar */}
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex flex-wrap gap-2 w-full md:w-auto">
+          <div className="flex gap-2 w-full md:w-auto">
             <button
               onClick={() => { setActiveTab('submissions'); setSearchQuery(''); }}
               className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
@@ -1383,15 +1512,6 @@ const proceedBulkDeleteQuestions = async () => {
             >
               <Users size={16} />
               <span>รายชื่อนักเรียน ({students.length})</span>
-            </button>
-            <button
-              onClick={() => { setActiveTab('exam-settings'); setSearchQuery(''); }}
-              className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
-                activeTab === 'exam-settings' ? 'bg-[#002B49] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <Award size={14} />
-              <span>ตั้งค่าเปิด-ปิดข้อสอบ</span>
             </button>
             <button
               onClick={() => { setActiveTab('questions'); setSearchQuery(''); }}
@@ -1475,13 +1595,13 @@ const proceedBulkDeleteQuestions = async () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredSubmissions.map(sub => {
+                      // Sum short answer score manually
                       let saScore = 0;
-                      if (sub.shortAnswerScores) {
-                        Object.keys(sub.shortAnswerScores).forEach(qId => {
-                          saScore += sub.shortAnswerScores[qId] || 0;
-                        });
-                      }
+                      Object.keys(sub.shortAnswerScores).forEach(qId => {
+                        saScore += sub.shortAnswerScores[qId] || 0;
+                      });
 
+                      // Calculate student attempts
                       const studentSubs = submissions
                         .filter(s => s.studentId === sub.studentId)
                         .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
@@ -1543,7 +1663,7 @@ const proceedBulkDeleteQuestions = async () => {
                                 type="button"
                                 id={`btn-grade-sub-${sub.id}`}
                                 onClick={() => openGradingSheet(sub)}
-                                className="px-3 py-1.5 bg-[#002B49] hover:bg-blue-950 text-white rounded font-bold text-[11px] transition-all cursor-pointer"
+                                className="px-3 py-1.5 bg-[#002B49] hover:bg-blue-950 text-white rounded font-bold text-[11px] transition-all"
                               >
                                 ตรวจและให้คะแนน
                               </button>
@@ -1568,7 +1688,6 @@ const proceedBulkDeleteQuestions = async () => {
           </div>
         )}
 
-        {/* TAB VIEW: SUMMARY STATISTICS */}
         {activeTab === 'summary' && (
           <div className="space-y-6" id="tab-summary">
             {/* Top Stat Cards */}
@@ -1616,6 +1735,7 @@ const proceedBulkDeleteQuestions = async () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {(() => {
+                  // Get all unique classes sorted
                   const uniqueClasses = Array.from(new Set(students.map(s => s.class))).sort();
                   const uniqueSubmitters = new Set(submissions.map(s => s.studentId));
 
@@ -1650,6 +1770,7 @@ const proceedBulkDeleteQuestions = async () => {
                           </span>
                         </div>
 
+                        {/* Progress bar */}
                         <div className="w-full bg-slate-200 rounded-full h-3.5 overflow-hidden border border-slate-300">
                           <div
                             className={`h-full transition-all duration-500 rounded-full ${
@@ -1661,6 +1782,7 @@ const proceedBulkDeleteQuestions = async () => {
                           />
                         </div>
 
+                        {/* Stats Info */}
                         <div className="grid grid-cols-3 gap-2 text-center">
                           <div className="bg-white p-2 rounded-lg border border-slate-200">
                             <span className="block text-[10px] text-slate-400 font-bold">ทั้งหมด</span>
@@ -1676,6 +1798,7 @@ const proceedBulkDeleteQuestions = async () => {
                           </div>
                         </div>
 
+                        {/* View Submitter Details */}
                         {submittedCount > 0 && (
                           <div className="space-y-2 bg-white p-3.5 rounded-lg border border-slate-200 mb-2">
                             <div className="text-[11px] font-bold text-green-700 flex items-center gap-1">
@@ -1705,6 +1828,7 @@ const proceedBulkDeleteQuestions = async () => {
                           </div>
                         )}
 
+                        {/* View Absentee Details */}
                         {absentCount > 0 ? (
                           <div className="space-y-2 bg-white p-3.5 rounded-lg border border-slate-200">
                             <div className="text-[11px] font-bold text-red-700 flex items-center gap-1">
@@ -1753,9 +1877,12 @@ const proceedBulkDeleteQuestions = async () => {
               <div className="flex flex-col sm:flex-row gap-2.5">
                 <input
                   type="text"
-                  value={sheetUrl}
+                  value={rosterSheetUrl}
                   id="sheet-url-input"
-                  onChange={(e) => setSheetUrl(e.target.value)}
+                  onChange={(e) => {
+                    setRosterSheetUrl(e.target.value);
+                    localStorage.setItem('google_roster_sheet_url', e.target.value);
+                  }}
                   placeholder="ลิงก์แชร์ของ Google Sheets"
                   className="flex-grow px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#002B49]"
                 />
@@ -1764,7 +1891,7 @@ const proceedBulkDeleteQuestions = async () => {
                   id="btn-fetch-sheet"
                   onClick={handleFetchGoogleSheet}
                   disabled={loading}
-                  className="px-6 py-2.5 bg-[#002B49] hover:bg-slate-800 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  className="px-6 py-2.5 bg-[#002B49] hover:bg-slate-800 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
                   <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                   <span>ดึงข้อมูลจาก Google Sheet</span>
@@ -1788,7 +1915,7 @@ const proceedBulkDeleteQuestions = async () => {
                   type="button"
                   id="btn-add-student-modal"
                   onClick={openAddStudent}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end cursor-pointer"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end"
                 >
                   <Plus size={14} />
                   <span>เพิ่มนักเรียนใหม่</span>
@@ -1826,14 +1953,14 @@ const proceedBulkDeleteQuestions = async () => {
                             <button
                               type="button"
                               onClick={() => openEditStudent(s)}
-                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors"
                             >
                               <Edit size={14} />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteStudent(s)}
-                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors cursor-pointer"
+                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1856,22 +1983,33 @@ const proceedBulkDeleteQuestions = async () => {
                 <h2 className="font-bold text-slate-800 text-sm">คลังและสุ่มข้อสอบ (Question Bank)</h2>
                 <p className="text-xs text-slate-500">จัดการ เพิ่ม แก้ไขตัวเลือก และคำตอบของโจทย์ข้อสอบทั้งหมดในระบบ</p>
               </div>
-              <div className="flex gap-2 shrink-0">
+              <div className="flex gap-2 shrink-0 flex-wrap">
                 {selectedQuestionIds.length > 0 && (
                   <button
                     type="button"
                     onClick={handleBulkDeleteQuestions}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors self-end animate-fade-in cursor-pointer"
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors self-end animate-fade-in"
                   >
                     <Trash2 size={14} />
                     <span>ลบที่เลือก ({selectedQuestionIds.length} ข้อ)</span>
+                  </button>
+                )}
+                {questions.length > 0 && (
+                  <button
+                    type="button"
+                    id="btn-delete-all-questions"
+                    onClick={handleDeleteAllQuestions}
+                    className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors self-end"
+                  >
+                    <Trash2 size={14} className="text-red-600" />
+                    <span>ลบข้อสอบทั้งหมดในระบบ ({questions.length} ข้อ)</span>
                   </button>
                 )}
                 <button
                   type="button"
                   id="btn-add-question-modal"
                   onClick={openAddQuestion}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end cursor-pointer"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end"
                 >
                   <Plus size={14} />
                   <span>เพิ่มข้อสอบใหม่</span>
@@ -1962,14 +2100,14 @@ const proceedBulkDeleteQuestions = async () => {
                             <button
                               type="button"
                               onClick={() => openEditQuestion(q)}
-                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors"
                             >
                               <Edit size={14} />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteQuestion(q)}
-                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors cursor-pointer"
+                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1980,58 +2118,6 @@ const proceedBulkDeleteQuestions = async () => {
                   </tbody>
                 </table>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* TAB VIEW 5: EXAM SYSTEM SETTINGS */}
-        {activeTab === 'exam-settings' && (
-          <div className="bg-white rounded-2xl shadow border border-slate-200 p-6 space-y-6" id="tab-exam-settings">
-            <div className="border-b border-slate-100 pb-3">
-              <h2 className="font-bold text-[#002B49] text-sm flex items-center gap-2">
-                <CheckSquare size={18} />
-                <span>ควบคุมการเปิด-ปิดระบบข้อสอบ (รายระดับชั้น)</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                คุณครูสามารถควบคุมการเปิดหรือปิดห้องสอบของแต่ละระดับชั้นได้ที่นี่ นักเรียนในระดับชั้นที่ถูก "ปิด" จะไม่สามารถเข้าไปทำข้อสอบหรือล็อกอินได้
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {[
-                { key: '3', label: 'มัธยมศึกษาปีที่ 3 (ม.3/2)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.3' },
-                { key: '5', label: 'มัธยมศึกษาปีที่ 5 (ม.5/3, ม.5/5)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.5' },
-                { key: '6', label: 'มัธยมศึกษาปีที่ 6 (ม.6/3, ม.6/5)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.6 ปกติ' },
-                { key: '6/8', label: 'มัธยมศึกษาปีที่ 6 (ม.6/8)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.6/8 (เรียนเฉพาะทาง)' },
-              ].map((exam) => (
-                <div key={exam.key} className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex justify-between items-center transition-all hover:shadow-xs">
-                  <div>
-                    <h3 className="font-bold text-slate-800 text-xs">{exam.label}</h3>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{exam.desc}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                      examSettings[exam.key] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {examSettings[exam.key] ? '🟢 กำลังเปิดสอบ' : '🔴 ปิดระบบสอบ'}
-                    </span>
-                    
-                    <button
-                      type="button"
-                      onClick={() => handleToggleExam(exam.key, !examSettings[exam.key])}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        examSettings[exam.key] ? 'bg-blue-600' : 'bg-slate-300'
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                          examSettings[exam.key] ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         )}
@@ -2047,7 +2133,7 @@ const proceedBulkDeleteQuestions = async () => {
                 <Users size={18} />
                 <span>{editingStudent ? 'แก้ไขข้อมูลนักเรียน' : 'เพิ่มข้อมูลนักเรียนใหม่'}</span>
               </h3>
-              <button onClick={() => setIsStudentModalOpen(false)} className="text-white/80 hover:text-white cursor-pointer">
+              <button onClick={() => setIsStudentModalOpen(false)} className="text-white/80 hover:text-white">
                 <X size={18} />
               </button>
             </div>
@@ -2109,14 +2195,14 @@ const proceedBulkDeleteQuestions = async () => {
                   type="button"
                   id="btn-cancel-student"
                   onClick={() => setIsStudentModalOpen(false)}
-                  className="w-1/3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer"
+                  className="w-1/3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
                   id="btn-submit-student"
-                  className="w-2/3 py-2 bg-[#002B49] text-white rounded font-bold transition-colors shadow hover:bg-blue-950 cursor-pointer"
+                  className="w-2/3 py-2 bg-[#002B49] text-white rounded font-bold transition-colors shadow hover:bg-blue-950"
                 >
                   บันทึกข้อมูล
                 </button>
@@ -2135,7 +2221,7 @@ const proceedBulkDeleteQuestions = async () => {
                 <Database size={18} />
                 <span>{editingQuestion ? 'แก้ไขข้อมูลข้อสอบ' : 'เพิ่มข้อสอบใหม่'}</span>
               </h3>
-              <button onClick={() => setIsQuestionModalOpen(false)} className="text-white/80 hover:text-white cursor-pointer">
+              <button onClick={() => setIsQuestionModalOpen(false)} className="text-white/80 hover:text-white">
                 <X size={18} />
               </button>
             </div>
@@ -2197,6 +2283,7 @@ const proceedBulkDeleteQuestions = async () => {
 
               <div className="space-y-1.5">
                 <label className="block text-slate-700 font-semibold">โจทย์คำถาม (พิมพ์ข้อความ)</label>
+                {/* Math Symbol Helper Toolbar for Teacher */}
                 <div className="flex flex-wrap gap-1 bg-slate-50 p-2.5 rounded-t border border-b-0 border-slate-300">
                   <span className="text-[10px] text-[#002B49] font-bold w-full mb-1">💡 เครื่องหมายคณิตศาสตร์ & เทมเพลต LaTeX (คลิกพิมพ์ใส่ช่องที่กำลังเลือก - โจทย์, ตัวเลือก หรือเฉลย):</span>
                   {[
@@ -2239,6 +2326,7 @@ const proceedBulkDeleteQuestions = async () => {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-b focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
                 />
 
+                {/* Question Live math preview for teacher */}
                 {questionForm.text && (
                   <div className="mt-1.5 bg-slate-50 p-2 border border-slate-200 rounded text-xs">
                     <span className="text-slate-400 block text-[9px] font-bold">พรีวิวการแสดงผลตัวโจทย์ (Live Preview):</span>
@@ -2284,7 +2372,7 @@ const proceedBulkDeleteQuestions = async () => {
                 </div>
                 {questionForm.image && (
                   <div className="mt-2 relative inline-block">
-                    <img src={questionForm.image} alt="Preview" className="max-h-24 object-contain rounded border bg-slate-100 p-1" />
+                    <img src={getCleanImageUrl(questionForm.image)} alt="Preview" className="max-h-24 object-contain rounded border bg-slate-100 p-1" />
                     <button
                       type="button"
                       onClick={() => setQuestionForm(prev => ({ ...prev, image: '' }))}
@@ -2294,8 +2382,14 @@ const proceedBulkDeleteQuestions = async () => {
                     </button>
                   </div>
                 )}
+                {!googleAccessToken && (
+                  <p className="text-[10px] text-slate-400 font-medium">
+                    💡 แนะนำให้กดปุ่ม "เชื่อมต่อบัญชี Google" ในแผงควบคุมก่อน เพื่อให้รูปเซฟตรงลง Google Drive ของคุณทันที! (หากไม่ต่อระบบจะเซฟในเซิร์ฟเวอร์สำรอง)
+                  </p>
+                )}
               </div>
 
+              {/* Multiple Choice specific input */}
               {questionForm.type === 'multiple-choice' && (
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3.5">
                   <p className="text-[11px] text-[#002B49] font-bold">กำหนดตัวเลือกตอบ ก ข ค ง (และ จ ถ้าต้องการ) พร้อมรูปภาพตัวเลือก:</p>
@@ -2348,6 +2442,7 @@ const proceedBulkDeleteQuestions = async () => {
                         </div>
                       </div>
 
+                      {/* Choice Live math preview */}
                       {choiceText && (
                         <div className="ml-16 mt-1 bg-slate-50/50 p-1.5 border border-slate-200 rounded text-[10px] flex items-center gap-2">
                           <span className="text-slate-400 font-bold shrink-0">พรีวิวคณิตศาสตร์:</span>
@@ -2360,10 +2455,13 @@ const proceedBulkDeleteQuestions = async () => {
                       {questionForm.choiceImages?.[cIdx] && (
                         <div className="ml-16 flex items-center gap-3 bg-slate-50 p-2 rounded border border-slate-200 max-w-md">
                           <img
-                            src={questionForm.choiceImages[cIdx]}
+                            src={getCleanImageUrl(questionForm.choiceImages[cIdx])}
                             alt={`รูปตัวเลือก ${['ก', 'ข', 'ค', 'ง', 'จ'][cIdx]}`}
                             className="h-12 object-contain rounded border bg-white"
                           />
+                          <div className="flex-grow text-[10px] font-mono truncate text-slate-400">
+                            {questionForm.choiceImages[cIdx]}
+                          </div>
                           <button
                             type="button"
                             onClick={() => {
@@ -2372,6 +2470,7 @@ const proceedBulkDeleteQuestions = async () => {
                               setQuestionForm({ ...questionForm, choiceImages: updatedImages });
                             }}
                             className="p-1 text-red-500 hover:bg-red-50 rounded"
+                            title="ลบรูปภาพนี้"
                           >
                             ❌
                           </button>
@@ -2379,6 +2478,43 @@ const proceedBulkDeleteQuestions = async () => {
                       )}
                     </div>
                   ))}
+
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      id="btn-remove-choice"
+                      onClick={() => {
+                        if (questionForm.choices.length > 4) {
+                          setQuestionForm({
+                            ...questionForm,
+                            choices: questionForm.choices.slice(0, -1),
+                            choiceImages: (questionForm.choiceImages || ['', '', '', '']).slice(0, -1)
+                          });
+                        }
+                      }}
+                      disabled={questionForm.choices.length <= 4}
+                      className="px-2 py-1 bg-red-100 text-red-700 rounded text-[10px] font-bold disabled:opacity-40 cursor-pointer"
+                    >
+                      - ลบตัวเลือก จ
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-add-choice"
+                      onClick={() => {
+                        if (questionForm.choices.length < 5) {
+                          setQuestionForm({
+                            ...questionForm,
+                            choices: [...questionForm.choices, ''],
+                            choiceImages: [...(questionForm.choiceImages || ['', '', '', '']), '']
+                          });
+                        }
+                      }}
+                      disabled={questionForm.choices.length >= 5}
+                      className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-[10px] font-bold disabled:opacity-40 cursor-pointer"
+                    >
+                      + เพิ่มตัวเลือก จ (5 ตัวเลือก)
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -2390,14 +2526,25 @@ const proceedBulkDeleteQuestions = async () => {
                   id="form-q-ans"
                   onChange={(e) => setQuestionForm({ ...questionForm, correctAnswer: e.target.value })}
                   onFocus={() => setFocusedInputId('form-q-ans')}
-                  placeholder="ระบุเฉลยคำตอบที่ถูกต้อง..."
+                  placeholder={questionForm.type === 'multiple-choice' ? 'พิมพ์ข้อความตัวเลือกที่ถูกต้องเป๊ะๆ (เช่น 30 หรือ ตารางเซนติเมตร)' : 'พิมพ์เฉลยตัวเลข'}
                   className="w-full px-3 py-2 bg-red-50/50 border border-red-200 rounded focus:outline-none focus:ring-1 focus:ring-red-500 font-medium"
                 />
+
+                {/* Correct Answer Live math preview */}
+                {questionForm.correctAnswer && (
+                  <div className="mt-1 bg-red-50/20 p-2 border border-red-200/50 rounded text-xs flex items-center gap-2">
+                    <span className="text-red-500 font-bold shrink-0">พรีวิวเฉลยคณิตศาสตร์:</span>
+                    <span className="font-semibold text-slate-800">
+                      <MathRenderer text={questionForm.correctAnswer} />
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-2.5 pt-4 border-t border-slate-100">
                 <button
                   type="button"
+                  id="btn-cancel-q"
                   onClick={() => setIsQuestionModalOpen(false)}
                   className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
                 >
@@ -2405,6 +2552,7 @@ const proceedBulkDeleteQuestions = async () => {
                 </button>
                 <button
                   type="submit"
+                  id="btn-submit-q"
                   className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow"
                 >
                   บันทึกข้อสอบ
@@ -2419,74 +2567,348 @@ const proceedBulkDeleteQuestions = async () => {
       {gradingSubmission && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full overflow-hidden my-8 flex flex-col max-h-[90vh]">
+            
+            {/* Header */}
             <div className="bg-gradient-to-r from-red-800 to-[#D22630] text-white p-5 shrink-0 flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-sm">ตรวจและให้คะแนนกระดาษคำตอบวิชาคณิตศาสตร์</h3>
-                <p className="text-[11px] text-white/80">นักเรียน: {gradingSubmission.name} (รหัส: {gradingSubmission.studentId})</p>
+                <p className="text-[11px] text-white/80">นักเรียน: {gradingSubmission.name} (รหัส: {gradingSubmission.studentId}) | ม.{gradingSubmission.class} เลขที่ {gradingSubmission.number}</p>
               </div>
-              <button onClick={() => setGradingSubmission(null)} className="text-white/80 hover:text-white cursor-pointer">
+              <button onClick={() => setGradingSubmission(null)} className="text-white/80 hover:text-white">
                 <X size={20} />
               </button>
             </div>
-            
+
+            {/* Grading Form Content */}
             <form onSubmit={handleSaveGrade} className="p-6 overflow-y-auto space-y-6 text-xs font-semibold flex-grow">
-              <div className="p-4 rounded-xl border bg-slate-50 flex justify-between items-center">
-                <span>บังคับสถานะทุจริต (คะแนนเป็น 0)</span>
-                <input 
-                  type="checkbox" 
-                  checked={gradingForm.cheated} 
-                  onChange={(e) => setGradingForm({...gradingForm, cheated: e.target.checked})} 
+              
+              {/* Cheat warning block / Control */}
+              <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${gradingForm.cheated ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
+                <div className="flex gap-2.5 items-start">
+                  <AlertOctagon size={18} className={`${gradingForm.cheated ? 'text-red-600' : 'text-green-600'} mt-0.5 shrink-0`} />
+                  <div>
+                    <h4 className="font-bold">{gradingForm.cheated ? '⚠️ ตรวจพบการออกจากหน้าระบบข้อสอบเกินกำหนด (ระบบล็อกคะแนนเป็น 0)' : '✅ ตรวจสอบสถานะการทุจริต: ปกติ'}</h4>
+                    <p className={`font-medium mt-1 text-[11px] ${gradingForm.cheated ? 'text-red-600' : 'text-green-700'}`}>
+                      {gradingForm.cheated 
+                        ? `นักเรียนสลับหน้าจอหรือสลับแท็บครบ ${gradingSubmission.cheatingWarningsCount} ครั้ง (คุณครูสามารถเอาเครื่องหมายถูกออกเพื่อยกเลิกการปรับเป็น 0 คะแนนและคืนสิทธิ์ให้ระบบคำนวณตามจริงได้)` 
+                        : `นักเรียนสอบตามกฎกติกาปกติ มีการเตือนสลับหน้าต่าง ${gradingSubmission.cheatingWarningsCount} ครั้ง (คุณครูสามารถทำเครื่องหมายถูกเพื่อปรับเป็นทุจริตได้ตามดุลยพินิจ)`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shrink-0 self-start sm:self-center">
+                  <input
+                    type="checkbox"
+                    id="grading-cheated-toggle"
+                    checked={gradingForm.cheated}
+                    onChange={(e) => {
+                      setGradingForm(prev => ({ ...prev, cheated: e.target.checked }));
+                    }}
+                    className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500 cursor-pointer"
+                  />
+                  <label htmlFor="grading-cheated-toggle" className="text-xs font-bold text-slate-800 cursor-pointer select-none">
+                    บังคับสิทธิ์ทุจริต (ปรับคะแนนเป็น 0)
+                  </label>
+                </div>
+              </div>
+
+              {/* Multiple Choice Review */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200 flex justify-between">
+                  <span>ส่วนที่ 1: ตรวจคะแนนปรนัยเลือกตอบ (15 ข้อ)</span>
+                  <span className="text-[#002B49]">ประเมินแล้ว: {gradingForm.cheated ? 0 : gradingSubmission.multipleChoiceScore} / 15 คะแนน</span>
+                </div>
+                <div className="p-4 bg-slate-50 space-y-4">
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    * ตรวจคะแนนปรนัยแบบเรียลไทม์ {gradingForm.cheated ? '(ทุจริตเป็น 0 คะแนน)' : `นักเรียนทำถูกต้อง ${gradingSubmission.multipleChoiceScore} ข้อ`} (คุณครูสามารถคลิกแก้ไขคำตอบเพื่อช่วยเหลือนักเรียนได้)
+                  </p>
+                  
+                  <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3">
+                    <p className="text-xs font-bold text-slate-700 border-b pb-1">รายละเอียดคำตอบและการขอแก้ไขคำตอบ:</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      {questions
+                        .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'multiple-choice')
+                        .map((q, idx) => {
+                          const originalAns = gradingSubmission.originalMultipleChoiceAnswers?.[q.id] || gradingSubmission.multipleChoiceAnswers[q.id] || '';
+                          const currentAns = gradingForm.editedMultipleChoiceAnswers?.[q.id] || '';
+                          const isCorrect = currentAns.toString().trim() === q.correctAnswer.toString().trim();
+
+                          // Find which letter corresponds to the correctAnswer
+                          const correctIdx = q.choices ? q.choices.indexOf(q.correctAnswer) : -1;
+                          const correctLetter = correctIdx !== -1 ? ['ก', 'ข', 'ค', 'ง', 'จ'][correctIdx] : '';
+                          const correctLabel = correctLetter ? `${correctLetter}. ${q.correctAnswer}` : q.correctAnswer;
+
+                          // Find which letter corresponds to the originalAnswer
+                          const originalIdx = q.choices ? q.choices.indexOf(originalAns) : -1;
+                          const originalLetter = originalIdx !== -1 ? ['ก', 'ข', 'ค', 'ง', 'จ'][originalIdx] : '';
+                          const originalLabel = originalLetter ? `${originalLetter}. ${originalAns}` : (originalAns || '(ไม่ได้ตอบ)');
+
+                          return (
+                            <div key={q.id} className="p-2.5 rounded bg-slate-50 border border-slate-200 flex flex-col justify-between gap-1 text-[11px]">
+                              <div className="flex justify-between items-start">
+                                <span className="font-bold text-slate-800">ข้อที่ {idx + 1}: {q.text.substring(0, 45)}...</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                  {isCorrect ? 'ถูกต้อง' : 'ผิด'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-blue-800 font-bold bg-blue-50/50 p-1 rounded border border-blue-100/40">เฉลยคีย์หลัก: {correctLabel}</p>
+                              <p className="text-[10px] text-slate-400">คำตอบแรกเริ่มที่นักเรียนส่ง: <span className="font-bold font-mono text-slate-600">"{originalLabel}"</span></p>
+                              <div className="flex items-center gap-1.5 mt-1">
+                                <span className="text-[10px] text-slate-500 shrink-0 font-bold">แก้ไขคำตอบปัจจุบัน:</span>
+                                <select
+                                  value={currentAns}
+                                  onChange={(e) => {
+                                    const updated = { ...gradingForm.editedMultipleChoiceAnswers };
+                                    updated[q.id] = e.target.value;
+                                    setGradingForm(prev => ({
+                                      ...prev,
+                                      editedMultipleChoiceAnswers: updated
+                                    }));
+                                  }}
+                                  className="text-[11px] px-1.5 py-0.5 bg-white border border-slate-300 rounded font-bold focus:outline-none cursor-pointer max-w-[160px]"
+                                >
+                                  <option value="">ไม่ได้ตอบ</option>
+                                  {q.choices?.map((choiceText, cIdx) => {
+                                    const letter = ['ก', 'ข', 'ค', 'ง', 'จ'][cIdx];
+                                    return (
+                                      <option key={cIdx} value={choiceText}>
+                                        {letter}. {choiceText}
+                                      </option>
+                                    );
+                                  })}
+                                  <option value="ก">ก (เลือกคีย์พยัญชนะ)</option>
+                                  <option value="ข">ข (เลือกคีย์พยัญชนะ)</option>
+                                  <option value="ค">ค (เลือกคีย์พยัญชนะ)</option>
+                                  <option value="ง">ง (เลือกคีย์พยัญชนะ)</option>
+                                  {q.choices?.[4] && <option value="จ">จ (เลือกคีย์พยัญชนะ)</option>}
+                                </select>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Short Answers Grading Module */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200">
+                  ส่วนที่ 2: ให้คะแนนข้อสอบอัตนัยเติมคำตอบ (5 ข้อ - ข้อละ 2 คะแนน)
+                </div>
+                <div className="p-4 bg-white divide-y divide-slate-100 space-y-4">
+                  {questions
+                    .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'short-answer')
+                    .map((q, idx) => {
+                      const originalAns = gradingSubmission.originalShortAnswers?.[q.id] || gradingSubmission.shortAnswers[q.id] || '';
+                      const currentAns = gradingForm.editedShortAnswers?.[q.id] || '';
+                      const isExactlyCorrect = currentAns.trim() === q.correctAnswer.trim();
+                      const currentScore = gradingForm.shortAnswerScores[q.id] || 0;
+
+                      return (
+                        <div key={q.id} className="pt-3 first:pt-0 flex flex-col md:flex-row justify-between gap-4 font-medium">
+                          <div className="space-y-1.5 w-2/3">
+                            <p className="text-slate-800 font-bold">ข้อที่ {idx + 1}: {q.text}</p>
+                            <p className="text-blue-800 font-bold">เฉลยระบบ: "{q.correctAnswer}"</p>
+                            <p className="text-[10px] text-slate-400">คำตอบแรกเริ่มที่นักเรียนส่ง: <span className="font-bold font-mono text-slate-600">"{originalAns || '(ไม่ได้ตอบ)'}"</span></p>
+                            <div className="flex items-center gap-1.5 text-slate-500 font-semibold mt-1">
+                              <span className="text-[10px] font-bold">แก้ไขคำตอบปัจจุบัน:</span>
+                              <input
+                                type="text"
+                                value={currentAns}
+                                onChange={(e) => {
+                                  const updated = { ...gradingForm.editedShortAnswers };
+                                  updated[q.id] = e.target.value;
+                                  setGradingForm(prev => ({
+                                    ...prev,
+                                    editedShortAnswers: updated
+                                  }));
+                                }}
+                                className="px-2 py-1 border border-slate-300 rounded font-bold font-mono text-xs w-48 bg-slate-50 focus:bg-white focus:outline-none"
+                                placeholder="พิมพ์แก้ไขคำตอบ..."
+                              />
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${isExactlyCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                {isExactlyCorrect ? 'ตรงกับคีย์' : 'ไม่ตรงคีย์'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 self-end md:self-center">
+                            <span className="text-xs text-slate-500">คะแนนเฉลย:</span>
+                            <div className="flex gap-1.5">
+                              <button
+                                type="button"
+                                id={`btn-score-0-${q.id}`}
+                                onClick={() => setGradingForm({
+                                  ...gradingForm,
+                                  shortAnswerScores: { ...gradingForm.shortAnswerScores, [q.id]: 0 }
+                                })}
+                                className={`w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${
+                                  currentScore === 0 ? 'bg-red-500 text-white border-red-500' : 'bg-white text-slate-500 hover:bg-slate-100'
+                                }`}
+                              >
+                                0
+                              </button>
+                              <button
+                                type="button"
+                                id={`btn-score-1-${q.id}`}
+                                onClick={() => setGradingForm({
+                                  ...gradingForm,
+                                  shortAnswerScores: { ...gradingForm.shortAnswerScores, [q.id]: 1 }
+                                })}
+                                className={`w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${
+                                  currentScore === 1 ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-500 hover:bg-slate-100'
+                                }`}
+                              >
+                                1
+                              </button>
+                              <button
+                                type="button"
+                                id={`btn-score-2-${q.id}`}
+                                onClick={() => setGradingForm({
+                                  ...gradingForm,
+                                  shortAnswerScores: { ...gradingForm.shortAnswerScores, [q.id]: 2 }
+                                })}
+                                className={`w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${
+                                  currentScore === 2 ? 'bg-green-500 text-white border-green-500' : 'bg-white text-slate-500 hover:bg-slate-100'
+                                }`}
+                              >
+                                2
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Written Drawing Grade */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200">
+                  ส่วนที่ 3: ตรวจกระดาษคำตอบแสดงวิธีทำ (1 ข้อ - เต็ม 5 คะแนน)
+                </div>
+                <div className="p-4 bg-white space-y-4">
+                  {/* Problem statement */}
+                  {questions
+                    .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'written')
+                    .map(q => (
+                      <div key={q.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
+                        <p className="font-bold text-slate-800">โจทย์: {q.text}</p>
+                        <p className="text-blue-800 font-bold mt-1">แนวเฉลยคีย์วิธีทำ: {q.correctAnswer}</p>
+                      </div>
+                    ))}
+
+                  {/* Base64 canvas render */}
+                  <div className="bg-slate-100 border rounded-lg p-4 flex flex-col items-center justify-center">
+                    {gradingSubmission.writtenAnswer ? (
+                      <img
+                        src={gradingSubmission.writtenAnswer}
+                        alt="กระดาษทดแสดงวิธีทำของนักเรียน"
+                        className="max-h-64 object-contain border-2 bg-white rounded shadow-sm"
+                      />
+                    ) : (
+                      <p className="text-slate-400 italic font-medium py-6">ไม่มีข้อมูลกระดาษวาดภาพตอบของนักเรียน</p>
+                    )}
+                  </div>
+
+                  {/* Input score written */}
+                  <div className="flex items-center gap-3 justify-end pt-2">
+                    <span className="text-xs text-slate-700 font-bold">กรอกคะแนนส่วนวิธีทำ (0-5):</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={5}
+                      value={gradingForm.writtenScore}
+                      id="grading-written-score"
+                      onChange={(e) => setGradingForm({ ...gradingForm, writtenScore: Math.min(5, Math.max(0, Number(e.target.value))) })}
+                      className="w-20 px-3 py-1.5 bg-slate-50 border border-slate-300 rounded font-bold font-mono text-center focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                    <span className="text-slate-400 font-bold">/ 5 คะแนน</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Feedback and comments */}
+              <div className="space-y-1.5">
+                <label className="block text-slate-700 font-bold">ข้อคิดเห็นและข้อเสนอแนะสำหรับการสอบครั้งนี้ (Feedback):</label>
+                <textarea
+                  value={gradingForm.feedback}
+                  id="grading-feedback"
+                  onChange={(e) => setGradingForm({ ...gradingForm, feedback: e.target.value })}
+                  placeholder="เขียนคำชี้แนะหรือข้อติติงให้นักเรียนรู้แนวทางแก้ไขปัญหา..."
+                  rows={3}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
                 />
               </div>
 
-              {/* ปิดท้ายด้วยปุ่ม Submit ของฟอร์ม */}
+              {/* Final grading action controls */}
               <div className="flex gap-2.5 pt-4 border-t border-slate-100">
                 <button
                   type="button"
+                  id="btn-cancel-grading"
                   onClick={() => setGradingSubmission(null)}
-                  className="w-1/3 py-2.5 bg-slate-100 text-slate-700 rounded"
+                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
                 >
-                  ปิดหน้าต่าง
+                  ยกเลิกการตรวจ
                 </button>
                 <button
                   type="submit"
-                  className="w-2/3 py-2.5 bg-green-600 text-white rounded font-bold shadow"
+                  id="btn-submit-grading"
+                  className="w-2/3 py-2.5 bg-[#D22630] hover:bg-red-800 text-white rounded font-bold transition-colors shadow flex items-center justify-center gap-1.5"
                 >
-                  บันทึกผลการตรวจคะแนน
+                  <Save size={14} />
+                  <span>บันทึกคะแนนรวมที่ประเมิน</span>
                 </button>
               </div>
+
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL 4: DELETE CONFIRMATION */}
+      {/* CUSTOM CONFIRMATION DIALOG MODAL */}
       {deleteConfirmInfo && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 text-center">
-            <AlertOctagon size={40} className="mx-auto text-red-600 mb-2" />
-            <h3 className="text-sm font-bold text-slate-900">ยืนยันการลบข้อมูล?</h3>
-            <p className="text-xs text-slate-500 my-2 break-words">{deleteConfirmInfo.name}</p>
-            <div className="flex gap-2 mt-4 text-xs font-bold">
-              <button 
-                type="button" 
-                onClick={() => setDeleteConfirmInfo(null)} 
-                className="w-1/2 py-2 bg-slate-100 rounded text-slate-700"
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-red-600 text-white p-4 font-bold flex items-center gap-2">
+              <AlertOctagon size={20} />
+              <span className="text-sm font-bold">ยืนยันการลบข้อมูล</span>
+            </div>
+            <div className="p-6 space-y-4 font-sans text-xs">
+              <p className="text-slate-600 text-xs font-semibold">คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลนี้ออกจากระบบอย่างถาวร?</p>
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs font-mono font-bold text-slate-700 break-words">
+                {deleteConfirmInfo.name}
+              </div>
+              <p className="text-[10px] text-red-500 font-medium">* การดำเนินการนี้จะไม่สามารถดึงข้อมูลคืนกลับมาได้อีก</p>
+            </div>
+            <div className="bg-slate-50 px-6 py-4 flex gap-3 justify-end border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmInfo(null)}
+                className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
               >
                 ยกเลิก
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={async () => {
-                  if (deleteConfirmInfo.type === 'student') await proceedDeleteStudent(deleteConfirmInfo.id);
-                  if (deleteConfirmInfo.type === 'question') await proceedDeleteQuestion(deleteConfirmInfo.id);
-                  if (deleteConfirmInfo.type === 'submission') await proceedDeleteSubmission(deleteConfirmInfo.id);
-                  if (deleteConfirmInfo.type === 'bulk-questions') await proceedBulkDeleteQuestions();
+                  const { id, type } = deleteConfirmInfo;
                   setDeleteConfirmInfo(null);
-                }} 
-                className="w-1/2 py-2 bg-red-600 text-white rounded"
+                  if (type === 'student') {
+                    await proceedDeleteStudent(id);
+                  } else if (type === 'bulk-questions') {
+                    await proceedBulkDeleteQuestions();
+                  } else if (type === 'all-questions') {
+                    await proceedDeleteAllQuestions();
+                  } else if (type === 'submission') {
+                    await proceedDeleteSubmission(id);
+                  } else {
+                    await proceedDeleteQuestion(id);
+                  }
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
               >
-                ยืนยันการลบ
+                <Trash2 size={13} />
+                <span>ยืนยันการลบ</span>
               </button>
             </div>
           </div>

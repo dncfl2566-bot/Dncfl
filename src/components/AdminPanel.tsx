@@ -52,10 +52,10 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   
   // --- ตัวแปรและฟังก์ชันควบคุมเปิด-ปิดระบบสอบ ---
   const [examSettings, setExamSettings] = useState<Record<string, boolean>>({
-    '3': true,
-    '5': true,
-    '6': true,
-    '6/8': true
+    '3': false,
+    '5': false,
+    '6': false,
+    '6/8': false
   });
 
   const fetchExamSettings = async () => {

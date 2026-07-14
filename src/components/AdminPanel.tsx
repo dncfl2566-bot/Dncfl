@@ -1012,8 +1012,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       name: `ข้อสอบที่เลือกทั้งหมดจำนวน ${selectedQuestionIds.length} ข้อ`
     });
   };
-
-  const proceedBulkDeleteQuestions = async () => {
+const proceedBulkDeleteQuestions = async () => {
   setLoading(true);
   try {
     const res = await fetch('/api/admin/questions/clear-all', {
@@ -1022,19 +1021,18 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     });
     const data = await res.json();
     if (data.success) {
-      setQuestions([]); // ล้างข้อสอบในหน้าจอออกทั้งหมด
-      setSelectedQuestionIds([]); // ล้างรายการที่เลือกค้างไว้
-      showMsg('ลบข้อสอบทั้งหมดออกจากระบบสำเร็จเรียบร้อยแล้ว', 'success');
+      setQuestions([]);
+      setSelectedQuestionIds([]);
+      showMsg('ลบข้อสอบทั้งหมดเรียบร้อยแล้ว', 'success');
     } else {
       showMsg(data.message || 'ลบไม่สำเร็จ', 'error');
     }
   } catch (err) {
-    showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+    showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ', 'error');
   } finally {
     setLoading(false);
   }
 };
-
   const getFilteredQuestions = () => {
     return questions.filter(q => {
       const s = searchQuery.toLowerCase().trim();

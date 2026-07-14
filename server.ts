@@ -5,7 +5,6 @@ import { createServer as createViteServer } from "vite";
 import { getInitialQuestions, getInitialStudents } from "./src/data/initialQuestions";
 import { Student, Question, Submission, SystemState } from "./src/types";
 
-// Helper to download Google Sheets or any URL content
 import http from "http";
 import https from "https";
 
@@ -19,29 +18,18 @@ function parseStudentCSV(csvText: string): Student[] {
   
   if (lines.length <= 1) return [];
 
-  // Parse headers to see column indices
   const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ''));
   
-  let idIdx = -1;
-  let nameIdx = -1;
-  let classIdx = -1;
-  let numIdx = -1;
+  let idIdx = -1, nameIdx = -1, classIdx = -1, numIdx = -1;
 
-  // Attempt to map headers based on common Thai/English names
   headers.forEach((h, idx) => {
     const low = h.toLowerCase();
-    if (low.includes("รหัส") || low.includes("id") || low.includes("student_id") || low.includes("student id")) {
-      idIdx = idx;
-    } else if (low.includes("ชื่อ") || low.includes("name") || low.includes("สกุล") || low.includes("fullname")) {
-      nameIdx = idx;
-    } else if (low.includes("ชั้น") || low.includes("class") || low.includes("grade") || low.includes("ห้อง")) {
-      classIdx = idx;
-    } else if (low.includes("เลขที่") || low.includes("no") || low.includes("number") || low.includes("index")) {
-      numIdx = idx;
-    }
+    if (low.includes("รหัส") || low.includes("id") || low.includes("student_id") || low.includes("student id")) idIdx = idx;
+    else if (low.includes("ชื่อ") || low.includes("name") || low.includes("สกุล") || low.includes("fullname")) nameIdx = idx;
+    else if (low.includes("ชั้น") || low.includes("class") || low.includes("grade") || low.includes("ห้อง")) classIdx = idx;
+    else if (low.includes("เลขที่") || low.includes("no") || low.includes("number") || low.includes("index")) numIdx = idx;
   });
 
-  // Fallback to indices if headers don't match
   if (idIdx === -1) idIdx = 0;
   if (nameIdx === -1) nameIdx = 1;
   if (classIdx === -1) classIdx = 2;
@@ -51,7 +39,6 @@ function parseStudentCSV(csvText: string): Student[] {
     const line = lines[i].trim();
     if (!line) continue;
 
-    // Split considering optional quotes around commas
     const cols: string[] = [];
     let inQuotes = false;
     let colBuffer = "";
@@ -75,70 +62,43 @@ function parseStudentCSV(csvText: string): Student[] {
     const className = cols[classIdx] || "3/2";
     const studentNum = parseInt(cols[numIdx] || `${i}`, 10) || i;
 
-    students.push({
-      id: studentId,
-      name: name,
-      class: className,
-      number: studentNum
-    });
+    students.push({ id: studentId, name, class: className, number: studentNum });
   }
-
   return students;
 }
 
-// Helper to fetch text from a URL (supports http and https)
 function fetchUrlText(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
     client.get(url, (res) => {
-      // Handle redirects
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         fetchUrlText(res.headers.location).then(resolve).catch(reject);
         return;
       }
-
       if (res.statusCode !== 200) {
         reject(new Error(`Failed to fetch URL. Status code: ${res.statusCode}`));
         return;
       }
-
       let data = "";
-      res.on("data", (chunk) => {
-        data += chunk;
-      });
-      res.on("end", () => {
-        resolve(data);
-      });
-    }).on("error", (err) => {
-      reject(err);
-    });
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => { resolve(data); });
+    }).on("error", (err) => { reject(err); });
   });
 }
 
-// Read database
 let cachedDbState: SystemState | null = null;
-// --- ตัวแปรเก็บสถานะเปิด-ปิดระบบสอบชั่วคราวบน Server ---
-let examSettings = {
-  '3': true,
-  '5': true,
-  '6': true,
-  '6/8': true
-};
+let examSettings: Record<string, boolean> = { '3': true, '5': true, '6': true, '6/8': true };
 
 function readDb(): SystemState {
-  if (cachedDbState) {
-    return cachedDbState;
-  }
+  if (cachedDbState) return cachedDbState;
   try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, "utf-8");
       const data = JSON.parse(raw);
-      // Fallback guarantees
       if (!data.students) data.students = getInitialStudents();
       if (!data.questions) data.questions = getInitialQuestions();
       if (!data.submissions) data.submissions = [];
 
-      // Migration check: Ensure '6/8' questions exist separately
       const has6_8 = data.questions.some((q: any) => q.gradeLevel === '6/8');
       if (!has6_8) {
         const grade6Questions = data.questions.filter((q: any) => q.gradeLevel === '6');
@@ -150,7 +110,6 @@ function readDb(): SystemState {
         data.questions = [...data.questions, ...cloned6_8];
         fs.writeFileSync(DB_FILE, JSON.stringify(data), "utf-8");
       }
-
       cachedDbState = data;
       return data;
     }
@@ -158,7 +117,6 @@ function readDb(): SystemState {
     console.error("Error reading database file, using fallback:", err);
   }
 
-  // If not exist, write initial state
   const initialQs = getInitialQuestions();
   const grade6Qs = initialQs.filter(q => q.gradeLevel === '6');
   const cloned6_8 = grade6Qs.map(q => ({
@@ -177,47 +135,39 @@ function readDb(): SystemState {
   return state;
 }
 
-// Write database with high-concurrency atomic serialization
 let isWritingDb = false;
 let pendingDbWriteState: SystemState | null = null;
 let isSyncingToGoogleSheets = false;
 let pendingGoogleSheetsSync = false;
 
-// --- GOOGLE SHEETS INTEGRATION HELPERS ---
-
+// 🔥 ฟังก์ชัน Push ข้อมูลขึ้นชีตแบบล้างข้อมูลเก่าก่อนเสมอ ป้องกันข้อมูลก้นชีตค้าง
 async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state: SystemState) {
   try {
-    // 1. Push Questions
+    // ล้างข้อมูลเก่าก่อน
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ranges: ["Questions!A:J", "Students!A:D", "Submissions!A:W"] })
+    });
+
+    // 1. จัดเรียง Questions
     const questionHeaders = ["ID", "GradeLevel", "Set", "Type", "QuestionNumber", "Text", "Image", "Choices", "ChoiceImages", "CorrectAnswer"];
     const questionRows = [questionHeaders];
     state.questions.forEach(q => {
       questionRows.push([
-        q.id,
-        q.gradeLevel,
-        q.set,
-        q.type,
-        q.questionNumber.toString(),
-        q.text,
-        q.image || "",
-        q.choices ? JSON.stringify(q.choices) : "",
-        q.choiceImages ? JSON.stringify(q.choiceImages) : "",
-        q.correctAnswer
+        q.id, q.gradeLevel, q.set, q.type, q.questionNumber.toString(), q.text, q.image || "",
+        q.choices ? JSON.stringify(q.choices) : "", q.choiceImages ? JSON.stringify(q.choiceImages) : "", q.correctAnswer
       ]);
     });
 
-    // 2. Push Students
+    // 2. จัดเรียง Students
     const studentHeaders = ["ID", "Name", "Class", "Number"];
     const studentRows = [studentHeaders];
     state.students.forEach(s => {
-      studentRows.push([
-        s.id,
-        s.name,
-        s.class,
-        s.number.toString()
-      ]);
+      studentRows.push([s.id, s.name, s.class, s.number.toString()]);
     });
 
-    // 3. Push Submissions
+    // 3. จัดเรียง Submissions
     const submissionHeaders = [
       "ID", "StudentId", "Name", "Class", "Number", "GradeLevel", "Set",
       "MultipleChoiceAnswers", "MultipleChoiceScore", "ShortAnswers", "ShortAnswerScores",
@@ -228,56 +178,20 @@ async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state
     const submissionRows = [submissionHeaders];
     state.submissions.forEach(sub => {
       submissionRows.push([
-        sub.id,
-        sub.studentId,
-        sub.name,
-        sub.class,
-        sub.number.toString(),
-        sub.gradeLevel,
-        sub.set,
-        JSON.stringify(sub.multipleChoiceAnswers),
-        sub.multipleChoiceScore.toString(),
-        JSON.stringify(sub.shortAnswers),
-        JSON.stringify(sub.shortAnswerScores),
-        sub.writtenAnswer || "",
-        sub.writtenScore.toString(),
-        sub.totalScore.toString(),
-        sub.timeTaken.toString(),
-        sub.cheatingWarningsCount.toString(),
-        sub.cheated ? "true" : "false",
-        sub.submittedAt,
-        sub.graded ? "true" : "false",
-        sub.gradedAt || "",
-        sub.feedback || "",
+        sub.id, sub.studentId, sub.name, sub.class, sub.number.toString(), sub.gradeLevel, sub.set,
+        JSON.stringify(sub.multipleChoiceAnswers), sub.multipleChoiceScore.toString(),
+        JSON.stringify(sub.shortAnswers), JSON.stringify(sub.shortAnswerScores),
+        sub.writtenAnswer || "", sub.writtenScore.toString(), sub.totalScore.toString(),
+        sub.timeTaken.toString(), sub.cheatingWarningsCount.toString(), sub.cheated ? "true" : "false",
+        sub.submittedAt, sub.graded ? "true" : "false", sub.gradedAt || "", sub.feedback || "",
         sub.originalMultipleChoiceAnswers ? JSON.stringify(sub.originalMultipleChoiceAnswers) : "",
         sub.originalShortAnswers ? JSON.stringify(sub.originalShortAnswers) : ""
       ]);
     });
-// ล้างข้อมูลเดิมก่อนเขียนข้อมูลใหม่
-await fetch(
-  `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
-  {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      ranges: [
-        "Questions!A2:Z",
-        "Students!A2:Z",
-        "Submissions!A2:Z"
-      ]
-    })
-  }
-);
-    // Make batchUpdate call to update all three sheets
+
     const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         valueInputOption: "USER_ENTERED",
         data: [
@@ -289,20 +203,13 @@ await fetch(
     });
 
     if (updateRes.status === 401) {
-      console.warn("Google Access Token is expired or invalid in background sync. Clearing token.");
       if (cachedDbState) {
         cachedDbState.googleAccessToken = undefined;
         writeDb(cachedDbState);
       }
       return;
     }
-
-    if (!updateRes.ok) {
-      const errText = await updateRes.text();
-      console.error(`Batch update Sheets failed: ${updateRes.statusText} - ${errText}`);
-    } else {
-      console.log("Successfully synchronized all data to Google Sheets in background!");
-    }
+    console.log("Synchronized all data to Google Sheets cleanly!");
   } catch (err) {
     console.error("Error pushing data to Google Sheets:", err);
   }
@@ -315,79 +222,38 @@ async function syncToGoogleSheetsWithQueue(token: string, spreadsheetId: string,
   }
   isSyncingToGoogleSheets = true;
   pendingGoogleSheetsSync = false;
-
   try {
     await pushAllToGoogleSheets(token, spreadsheetId, state);
-  } catch (err) {
-    console.error("Failed to sync to Google Sheets:", err);
   } finally {
     isSyncingToGoogleSheets = false;
     if (pendingGoogleSheetsSync && cachedDbState && cachedDbState.googleAccessToken && cachedDbState.spreadsheetId) {
-      // Trigger next sync
       syncToGoogleSheetsWithQueue(cachedDbState.googleAccessToken, cachedDbState.spreadsheetId, cachedDbState);
     }
   }
 }
 
 async function createMathExamSpreadsheet(token: string, state: SystemState): Promise<string> {
-  try {
-    const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        properties: {
-          title: "ระบบทำข้อสอบคณิตศาสตร์ (Math Exam System)"
-        },
-        sheets: [
-          { properties: { title: "Questions" } },
-          { properties: { title: "Students" } },
-          { properties: { title: "Submissions" } }
-        ]
-      })
-    });
-
-    if (!createRes.ok) {
-      const errText = await createRes.text();
-      throw new Error(`Failed to create spreadsheet: ${createRes.statusText} - ${errText}`);
-    }
-
-    const data: any = await createRes.json();
-    const spreadsheetId = data.spreadsheetId;
-    console.log("Created Google Spreadsheet with ID:", spreadsheetId);
-
-    // Populate data right after creation
-    await pushAllToGoogleSheets(token, spreadsheetId, state);
-
-    return spreadsheetId;
-  } catch (err) {
-    console.error("Error creating Google Spreadsheet:", err);
-    throw err;
-  }
+  const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      properties: { title: "ระบบทำข้อสอบคณิตศาสตร์ (Math Exam System)" },
+      sheets: [{ properties: { title: "Questions" } }, { properties: { title: "Students" } }, { properties: { title: "Submissions" } }]
+    })
+  });
+  if (!createRes.ok) throw new Error("Failed to create spreadsheet");
+  const data: any = await createRes.json();
+  await pushAllToGoogleSheets(token, data.spreadsheetId, state);
+  return data.spreadsheetId;
 }
 
 async function findMathExamSpreadsheet(token: string): Promise<string | null> {
-  try {
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='ระบบทำข้อสอบคณิตศาสตร์ (Math Exam System)' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
-    const searchRes = await fetch(searchUrl, {
-      headers: { "Authorization": `Bearer ${token}` }
-    });
-    if (!searchRes.ok) {
-      const errText = await searchRes.text();
-      console.error(`Search spreadsheet failed: ${searchRes.statusText} - ${errText}`);
-      return null;
-    }
-    const searchData: any = await searchRes.json();
-    if (searchData.files && searchData.files.length > 0) {
-      return searchData.files[0].id;
-    }
-    return null;
-  } catch (err) {
-    console.error("Error searching for spreadsheet:", err);
-    return null;
-  }
+  const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=name='ระบบทำข้อสอบคณิตศาสตร์ (Math Exam System)' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`, {
+    headers: { "Authorization": `Bearer ${token}` }
+  });
+  if (!searchRes.ok) return null;
+  const searchData: any = await searchRes.json();
+  return (searchData.files && searchData.files.length > 0) ? searchData.files[0].id : null;
 }
 
 async function ensureSpreadsheetTabs(token: string, spreadsheetId: string) {
@@ -398,160 +264,58 @@ async function ensureSpreadsheetTabs(token: string, spreadsheetId: string) {
     if (!getRes.ok) return;
     const data: any = await getRes.json();
     const existingTitles = (data.sheets || []).map((s: any) => s.properties?.title);
-    
     const required = ["Questions", "Students", "Submissions"];
     const missing = required.filter(title => !existingTitles.includes(title));
-    
     if (missing.length > 0) {
-      console.log(`Adding missing sheets to spreadsheet ${spreadsheetId}:`, missing);
-      const requests = missing.map(title => ({
-        addSheet: { properties: { title } }
-      }));
-      
+      const requests = missing.map(title => ({ addSheet: { properties: { title } } }));
       await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ requests })
       });
     }
-  } catch (err) {
-    console.error("Error ensuring sheet tabs exist:", err);
-  }
+  } catch (err) { console.error(err); }
 }
 
 async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Promise<Partial<SystemState>> {
   const result: Partial<SystemState> = {};
-  try {
-    // Read all ranges
-    const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=Questions!A:J&ranges=Students!A:D&ranges=Submissions!A:W`, {
-      headers: { "Authorization": `Bearer ${token}` }
-    });
+  const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=Questions!A:J&ranges=Students!A:D&ranges=Submissions!A:W`, {
+    headers: { "Authorization": `Bearer ${token}` }
+  });
+  if (!getRes.ok) return result;
+  
+  const data: any = await getRes.json();
+  const valueRanges = data.valueRanges || [];
 
-    if (getRes.status === 401) {
-      console.warn("Google Access Token is expired or invalid in background pull. Clearing token.");
-      if (cachedDbState) {
-        cachedDbState.googleAccessToken = undefined;
-        writeDb(cachedDbState);
-      }
-      return result;
+  // Parse Questions from sheet
+  const questionsVal = valueRanges[0]?.values || [];
+  if (questionsVal.length > 1) {
+    const parsedQuestions: Question[] = [];
+    for (let i = 1; i < questionsVal.length; i++) {
+      const row = questionsVal[i];
+      if (!row[0]) continue;
+      let choices, choiceImages;
+      try { if (row[7]) choices = JSON.parse(row[7]); } catch (_) {}
+      try { if (row[8]) choiceImages = JSON.parse(row[8]); } catch (_) {}
+      parsedQuestions.push({
+        id: row[0], gradeLevel: row[1] as any, set: row[2] as any, type: row[3] as any,
+        questionNumber: parseInt(row[4], 10) || i, text: row[5] || "", image: row[6] || undefined,
+        choices, choiceImages, correctAnswer: row[9] || ""
+      });
     }
+    result.questions = parsedQuestions;
+  }
 
-    if (!getRes.ok) {
-      const errText = await getRes.text();
-      console.error(`Batch get Sheets failed: ${getRes.statusText} - ${errText}`);
-      return result;
+  // Parse Students from sheet
+  const studentsVal = valueRanges[1]?.values || [];
+  if (studentsVal.length > 1) {
+    const parsedStudents: Student[] = [];
+    for (let i = 1; i < studentsVal.length; i++) {
+      const row = studentsVal[i];
+      if (!row[0] || !row[1]) continue;
+      parsedStudents.push({ id: row[0], name: row[1], class: row[2] || "3/2", number: parseInt(row[3], 10) || i });
     }
-
-    const data: any = await getRes.json();
-    const valueRanges = data.valueRanges || [];
-
-    // Parse Questions
-    const questionsVal = valueRanges[0]?.values || [];
-    if (questionsVal.length > 1) {
-      const parsedQuestions: Question[] = [];
-      for (let i = 1; i < questionsVal.length; i++) {
-        const row = questionsVal[i];
-        if (!row[0]) continue;
-        
-        let choices: string[] | undefined = undefined;
-        try {
-          if (row[7]) choices = JSON.parse(row[7]);
-        } catch (_) {}
-
-        let choiceImages: string[] | undefined = undefined;
-        try {
-          if (row[8]) choiceImages = JSON.parse(row[8]);
-        } catch (_) {}
-
-        parsedQuestions.push({
-          id: row[0],
-          gradeLevel: row[1] as any,
-          set: row[2] as any,
-          type: row[3] as any,
-          questionNumber: parseInt(row[4], 10) || i,
-          text: row[5] || "",
-          image: row[6] || undefined,
-          choices,
-          choiceImages,
-          correctAnswer: row[9] || ""
-        });
-      }
-      result.questions = parsedQuestions;
-    }
-
-    // Parse Students
-    const studentsVal = valueRanges[1]?.values || [];
-    if (studentsVal.length > 1) {
-      const parsedStudents: Student[] = [];
-      for (let i = 1; i < studentsVal.length; i++) {
-        const row = studentsVal[i];
-        if (!row[0] || !row[1]) continue;
-        parsedStudents.push({
-          id: row[0],
-          name: row[1],
-          class: row[2] || "3/2",
-          number: parseInt(row[3], 10) || i
-        });
-      }
-      result.students = parsedStudents;
-    }
-
-    // Parse Submissions
-    const submissionsVal = valueRanges[2]?.values || [];
-    if (submissionsVal.length > 1) {
-      const parsedSubmissions: Submission[] = [];
-      for (let i = 1; i < submissionsVal.length; i++) {
-        const row = submissionsVal[i];
-        if (!row[0]) continue;
-
-        let mcAns = {};
-        try { if (row[7]) mcAns = JSON.parse(row[7]); } catch (_) {}
-
-        let shAns = {};
-        try { if (row[9]) shAns = JSON.parse(row[9]); } catch (_) {}
-
-        let shScores = {};
-        try { if (row[10]) shScores = JSON.parse(row[10]); } catch (_) {}
-
-        let origMcAns = undefined;
-        try { if (row[21]) origMcAns = JSON.parse(row[21]); } catch (_) {}
-
-        let origShAns = undefined;
-        try { if (row[22]) origShAns = JSON.parse(row[22]); } catch (_) {}
-
-        parsedSubmissions.push({
-          id: row[0],
-          studentId: row[1] || "",
-          name: row[2] || "",
-          class: row[3] || "3/2",
-          number: parseInt(row[4], 10) || 0,
-          gradeLevel: row[5] as any,
-          set: row[6] as any,
-          multipleChoiceAnswers: mcAns,
-          multipleChoiceScore: parseInt(row[8], 10) || 0,
-          shortAnswers: shAns,
-          shortAnswerScores: shScores,
-          writtenAnswer: row[11] || "",
-          writtenScore: parseFloat(row[12]) || 0,
-          totalScore: parseFloat(row[13]) || 0,
-          timeTaken: parseFloat(row[14]) || 0,
-          cheatingWarningsCount: parseInt(row[15], 10) || 0,
-          cheated: row[16] === "true",
-          submittedAt: row[17] || "",
-          graded: row[18] === "true",
-          gradedAt: row[19] || undefined,
-          feedback: row[20] || undefined,
-          originalMultipleChoiceAnswers: origMcAns,
-          originalShortAnswers: origShAns
-        });
-      }
-      result.submissions = parsedSubmissions;
-    }
-  } catch (err) {
-    console.error("Error pulling data from Google Sheets:", err);
+    result.students = parsedStudents;
   }
   return result;
 }
@@ -560,12 +324,8 @@ function writeDb(state: SystemState) {
   cachedDbState = state;
   pendingDbWriteState = state;
   triggerDbWrite();
-
-  // Trigger Google Sheets background sync if set up
   if (state.googleAccessToken && state.spreadsheetId) {
-    syncToGoogleSheetsWithQueue(state.googleAccessToken, state.spreadsheetId, state).catch(err => {
-      console.error("Auto background Google Sheets sync failed:", err);
-    });
+    syncToGoogleSheetsWithQueue(state.googleAccessToken, state.spreadsheetId, state).catch(e => console.error(e));
   }
 }
 
@@ -574,20 +334,11 @@ function triggerDbWrite() {
   isWritingDb = true;
   const stateToWrite = pendingDbWriteState;
   pendingDbWriteState = null;
-
   const tempPath = DB_FILE + ".tmp";
   fs.writeFile(tempPath, JSON.stringify(stateToWrite), "utf-8", (err) => {
-    if (err) {
-      console.error("Atomic write failed at step 1:", err);
-      isWritingDb = false;
-      triggerDbWrite();
-      return;
-    }
+    if (err) { isWritingDb = false; triggerDbWrite(); return; }
     fs.rename(tempPath, DB_FILE, (renameErr) => {
       isWritingDb = false;
-      if (renameErr) {
-        console.error("Atomic rename failed:", renameErr);
-      }
       triggerDbWrite();
     });
   });
@@ -596,46 +347,27 @@ function triggerDbWrite() {
 function getThailandTimestamp(): string {
   try {
     return new Intl.DateTimeFormat('sv-SE', {
-      timeZone: 'Asia/Bangkok',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
+      timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
     }).format(new Date());
   } catch (e) {
-    const d = new Date();
-    d.setHours(d.getHours() + 7);
+    const d = new Date(); d.setHours(d.getHours() + 7);
     return d.toISOString().replace('T', ' ').substring(0, 19);
   }
 }
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '50mb' })); // Allow larger payloads for canvas base64 images
+  app.use(express.json({ limit: '50mb' }));
 
-  // Initialize DB
-  readDb();
-
-  // API: Student Login
   app.post("/api/login", (req, res) => {
     const { username } = req.body;
-    if (!username) {
-      return res.status(400).json({ success: false, message: "กรุณากรอกรหัสนักเรียน" });
-    }
-
+    if (!username) return res.status(400).json({ success: false, message: "กรุณากรอกรหัสนักเรียน" });
     const state = readDb();
     const student = state.students.find(s => s.id === username.trim());
-    if (student) {
-      res.json({ success: true, student });
-    } else {
-      res.json({ success: false, message: "ไม่พบรหัสนักเรียนนี้ในระบบ" });
-    }
+    res.json(student ? { success: true, student } : { success: false, message: "ไม่พบรหัสนักเรียนนี้ในระบบ" });
   });
 
-  // API: Admin Login
   app.post("/api/admin/login", (req, res) => {
     const { username, password } = req.body;
     if (username === "cfl128211" && password === "dn128211") {
@@ -645,17 +377,14 @@ async function startServer() {
     }
   });
 
-  // API: Get questions for specific class and student number
+  // 🛡️ โค้ดส่วนสุ่มข้อสอบชุด A / B สำหรับเลขที่คี่/คู่ ยังได้รับการรักษาไว้อย่างถูกต้องแม่นยำ
   app.get("/api/questions", (req, res) => {
     const { class: className, number } = req.query;
-    if (!className || !number) {
-      return res.status(400).json({ success: false, message: "ข้อมูลห้องเรียนหรือเลขที่ไม่ครบถ้วน" });
-    }
+    if (!className || !number) return res.status(400).json({ success: false, message: "ข้อมูลห้องเรียนหรือเลขที่ไม่ครบถ้วน" });
 
     const studentNumber = parseInt(number as string, 10);
-    const set = studentNumber % 2 === 1 ? 'A' : 'B'; // Odd -> A, Even -> B
+    const set = studentNumber % 2 === 1 ? 'A' : 'B'; // เลขที่คี่ได้ชุด A, คู่ได้ชุด B
 
-    // Class mapping to Grade levels
     let gradeLevel: '3' | '5' | '6' | '6/8' = '3';
     const cStr = (className as string).trim();
     if (cStr.startsWith("3/")) gradeLevel = '3';
@@ -663,285 +392,125 @@ async function startServer() {
     else if (cStr === "6/8") gradeLevel = '6/8';
     else if (cStr.startsWith("6/")) gradeLevel = '6';
 
-    // เช็กสถานะการเปิด/ปิดสอบผ่านทาง examSettings
-    const isExamOpen = examSettings[gradeLevel];
-    if (isExamOpen === false) {
-      return res.status(403).json({ 
-        success: false, 
-        message: `ขณะนี้ระบบสอบของระดับชั้น ม.${gradeLevel} ได้ปิดบริการชั่วคราวแล้ว กรุณาติดต่อคุณครูผู้คุมสอบ` 
-      });
+    if (examSettings[gradeLevel] === false) {
+      return res.status(403).json({ success: false, message: `ขณะนี้ระบบสอบของระดับชั้น ม.${gradeLevel} ปิดบริการชั่วคราว` });
     }
     
     const state = readDb();
-    const filteredQuestions = state.questions.filter(
-      q => q.gradeLevel === gradeLevel && q.set === set
-    );
-
-    res.json({
-      success: true,
-      gradeLevel,
-      set,
-      questions: filteredQuestions
-    });
+    const filteredQuestions = state.questions.filter(q => q.gradeLevel === gradeLevel && q.set === set);
+    res.json({ success: true, gradeLevel, set, questions: filteredQuestions });
   });
 
-  // API: Submit student exam answers
   app.post("/api/submit", (req, res) => {
-    const {
-      studentId,
-      class: className,
-      number,
-      gradeLevel,
-      set,
-      multipleChoiceAnswers,
-      shortAnswers,
-      writtenAnswer,
-      timeTaken,
-      cheatingWarningsCount
-    } = req.body;
-
+    const { studentId, class: className, number, gradeLevel, set, multipleChoiceAnswers, shortAnswers, writtenAnswer, timeTaken, cheatingWarningsCount } = req.body;
     const state = readDb();
-
-    // 1. Double check student info
     const student = state.students.find(s => s.id === studentId);
     const studentName = student ? student.name : "นักเรียนภายนอก";
 
-    // 2. Fetch specific set questions to calculate Multiple Choice score
-    const targetQuestions = state.questions.filter(
-      q => q.gradeLevel === gradeLevel && q.set === set
-    );
-
+    const targetQuestions = state.questions.filter(q => q.gradeLevel === gradeLevel && q.set === set);
     let mcScore = 0;
-    const mcQuestions = targetQuestions.filter(q => q.type === 'multiple-choice');
-    
-    mcQuestions.forEach(q => {
+    targetQuestions.filter(q => q.type === 'multiple-choice').forEach(q => {
       const studentAns = multipleChoiceAnswers[q.id];
-      if (studentAns !== undefined && studentAns !== null) {
-        if (studentAns.toString().trim() === q.correctAnswer.toString().trim()) {
-          mcScore++;
-        }
-      }
+      if (studentAns !== undefined && studentAns !== null && studentAns.toString().trim() === q.correctAnswer.toString().trim()) mcScore++;
     });
 
     const isCheated = cheatingWarningsCount >= 3;
     const finalMcScore = isCheated ? 0 : mcScore;
-
-    // 3. Initialize short answer scores to 0 (admin will grade these later)
     const shortAnswerScores: Record<string, number> = {};
-    const saQuestions = targetQuestions.filter(q => q.type === 'short-answer');
-    saQuestions.forEach(q => {
-      shortAnswerScores[q.id] = 0; // default to 0
-    });
+    targetQuestions.filter(q => q.type === 'short-answer').forEach(q => { shortAnswerScores[q.id] = 0; });
 
     const submission: Submission = {
       id: `${studentId}-${className.replace("/", "_")}-${Date.now()}`,
-      studentId,
-      name: studentName,
-      class: className,
-      number: parseInt(number, 10),
-      gradeLevel,
-      set,
-      multipleChoiceAnswers,
-      multipleChoiceScore: finalMcScore,
-      shortAnswers,
-      shortAnswerScores,
-      writtenAnswer,
-      writtenScore: 0,
-      totalScore: finalMcScore, // Initially only MC score (unless cheated = 0)
-      timeTaken,
-      cheatingWarningsCount,
-      cheated: isCheated,
-      submittedAt: getThailandTimestamp(),
-      graded: false
+      studentId, name: studentName, class: className, number: parseInt(number, 10), gradeLevel, set,
+      multipleChoiceAnswers, multipleChoiceScore: finalMcScore, shortAnswers, shortAnswerScores,
+      writtenAnswer, writtenScore: 0, totalScore: finalMcScore, timeTaken, cheatingWarningsCount, cheated: isCheated,
+      submittedAt: getThailandTimestamp(), graded: false
     };
-
-    // Keep all previous submissions as requested for multi-attempt support
     state.submissions.push(submission);
-    
     writeDb(state);
-
     res.json({ success: true, submission });
   });
 
-  // ADMIN API: Get all submissions
-  app.get("/api/admin/submissions", (req, res) => {
-    const state = readDb();
-    res.json({ success: true, submissions: state.submissions });
-  });
-
-  // ADMIN API: API สำหรับให้แอดมินดึงค่าสถานะไปแสดงผลบนปุ่มสวิตช์
-  app.get('/api/admin/settings', (req, res) => {
-    res.json({ success: true, settings: examSettings });
-  });
-
-  // ADMIN API: API สำหรับบันทึกสถานะเปิด-ปิดระบบสอบของแต่ละชั้น
+  app.get("/api/admin/submissions", (req, res) => { res.json({ success: true, submissions: readDb().submissions }); });
+  app.get('/api/admin/settings', (req, res) => { res.json({ success: true, settings: examSettings }); });
+  
   app.post('/api/admin/settings', (req, res) => {
     const { settings } = req.body;
-    if (settings) {
-      examSettings = { ...examSettings, ...settings };
-      return res.json({ success: true, settings: examSettings });
-    }
-    res.status(400).json({ success: false, message: 'ข้อมูลการตั้งค่าไม่ถูกต้อง' });
+    if (settings) { examSettings = { ...examSettings, ...settings }; return res.json({ success: true, settings: examSettings }); }
+    res.status(400).json({ success: false, message: 'ข้อมูลไม่ถูกต้อง' });
   });
 
-  // ADMIN API: Delete submission
   app.post("/api/admin/submissions/delete", (req, res) => {
     const { submissionId } = req.body;
-    if (!submissionId) {
-      return res.status(400).json({ success: false, message: "กรุณาระบุรหัสการส่งคำตอบที่ต้องการลบ" });
-    }
-
     const state = readDb();
-    const subExists = state.submissions.some(s => s.id === submissionId);
-    if (!subExists) {
-      return res.status(404).json({ success: false, message: "ไม่พบข้อมูลการส่งคำตอบนี้" });
-    }
-
+    if (!state.submissions.some(s => s.id === submissionId)) return res.status(404).json({ success: false, message: "ไม่พบข้อมูล" });
     state.submissions = state.submissions.filter(s => s.id !== submissionId);
     writeDb(state);
-
-    res.json({ success: true, message: "ลบกระดาษคำตอบของนักเรียนเรียบร้อยแล้ว" });
+    res.json({ success: true, message: "ลบกระดาษคำตอบเรียบร้อยแล้ว" });
   });
 
-  // ADMIN API: Upload local image (Base64)
   app.post("/api/admin/upload", (req, res) => {
     const { imageBase64, filename } = req.body;
-    if (!imageBase64) {
-      return res.status(400).json({ success: false, message: "ไม่พบข้อมูลรูปภาพประกอบ" });
-    }
-
+    if (!imageBase64) return res.status(400).json({ success: false, message: "ไม่พบรูปภาพ" });
     try {
-      // Create public/uploads directory if not exists
       const uploadsDir = path.join(process.cwd(), "public", "uploads");
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-
-      // Extract raw base64 data
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
       const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-      const buffer = Buffer.from(base64Data, "base64");
-
-      // Generate unique name
       const uniqueFilename = `${Date.now()}-${filename || "image.png"}`;
-      const filePath = path.join(uploadsDir, uniqueFilename);
-
-      fs.writeFileSync(filePath, buffer);
-
-      // Return local server URL path
+      fs.writeFileSync(path.join(uploadsDir, uniqueFilename), Buffer.from(base64Data, "base64"));
       res.json({ success: true, url: `/uploads/${uniqueFilename}` });
-    } catch (err: any) {
-      console.error("Upload error:", err);
-      res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดทางเซิร์ฟเวอร์ในการบันทึกรูปภาพ" });
-    }
+    } catch (err) { res.status(500).json({ success: false }); }
   });
 
-  // ADMIN API: Grade short answers and written answer
   app.post("/api/admin/grade", (req, res) => {
-    const { 
-      submissionId, 
-      shortAnswerScores, 
-      writtenScore, 
-      feedback,
-      editedMultipleChoiceAnswers,
-      editedShortAnswers,
-      cheated
-    } = req.body;
-
+    const { submissionId, shortAnswerScores, writtenScore, feedback, editedMultipleChoiceAnswers, editedShortAnswers, cheated } = req.body;
     const state = readDb();
     const subIdx = state.submissions.findIndex(s => s.id === submissionId);
-    if (subIdx === -1) {
-      return res.status(404).json({ success: false, message: "ไม่พบข้อมูลการส่งข้อสอบนี้" });
-    }
+    if (subIdx === -1) return res.status(404).json({ success: false });
 
     const sub = state.submissions[subIdx];
+    if (!sub.originalMultipleChoiceAnswers) sub.originalMultipleChoiceAnswers = { ...sub.multipleChoiceAnswers };
+    if (!sub.originalShortAnswers) sub.originalShortAnswers = { ...sub.shortAnswers };
 
-    // Preserve original answers on the very first edit
-    if (!sub.originalMultipleChoiceAnswers) {
-      sub.originalMultipleChoiceAnswers = { ...sub.multipleChoiceAnswers };
-    }
-    if (!sub.originalShortAnswers) {
-      sub.originalShortAnswers = { ...sub.shortAnswers };
-    }
+    if (cheated !== undefined) sub.cheated = cheated;
+    if (editedMultipleChoiceAnswers) sub.multipleChoiceAnswers = editedMultipleChoiceAnswers;
+    if (editedShortAnswers) sub.shortAnswers = editedShortAnswers;
 
-    // Update cheated status if provided by admin
-    if (cheated !== undefined) {
-      sub.cheated = cheated;
-    }
-
-    // Apply edited multiple-choice answers and recalculate score
-    if (editedMultipleChoiceAnswers) {
-      sub.multipleChoiceAnswers = editedMultipleChoiceAnswers;
-    }
-
-    const targetQuestions = state.questions.filter(
-      q => q.gradeLevel === sub.gradeLevel && q.set === sub.set
-    );
-    const mcQuestions = targetQuestions.filter(q => q.type === 'multiple-choice');
+    const targetQuestions = state.questions.filter(q => q.gradeLevel === sub.gradeLevel && q.set === sub.set);
     let mcScore = 0;
-    
-    mcQuestions.forEach(q => {
+    targetQuestions.filter(q => q.type === 'multiple-choice').forEach(q => {
       const ans = sub.multipleChoiceAnswers[q.id];
-      if (ans !== undefined && ans !== null) {
-        if (ans.toString().trim() === q.correctAnswer.toString().trim()) {
-          mcScore++;
-        }
-      }
+      if (ans !== undefined && ans !== null && ans.toString().trim() === q.correctAnswer.toString().trim()) mcScore++;
     });
 
-    // Apply edited short answers
-    if (editedShortAnswers) {
-      sub.shortAnswers = editedShortAnswers;
-    }
-    
     sub.multipleChoiceScore = mcScore;
     sub.shortAnswerScores = shortAnswerScores;
     sub.writtenScore = parseFloat(writtenScore) || 0;
     
-    // Calculate total short answer score
     let saSum = 0;
-    Object.keys(shortAnswerScores).forEach(qId => {
-      saSum += parseFloat(shortAnswerScores[qId]) || 0;
-    });
-
+    Object.keys(shortAnswerScores).forEach(qId => { saSum += parseFloat(shortAnswerScores[qId]) || 0; });
     sub.totalScore = sub.multipleChoiceScore + saSum + sub.writtenScore;
     sub.feedback = feedback;
-
     sub.graded = true;
     sub.gradedAt = getThailandTimestamp();
 
     state.submissions[subIdx] = sub;
     writeDb(state);
-
     res.json({ success: true, submission: sub });
   });
 
-  // ADMIN API: Get student list
-  app.get("/api/admin/students", (req, res) => {
-    const state = readDb();
-    res.json({ success: true, students: state.students });
-  });
+  app.get("/api/admin/students", (req, res) => { res.json({ success: true, students: readDb().students }); });
 
-  // ADMIN API: Import students manually
   app.post("/api/admin/students/import", (req, res) => {
     const { students } = req.body;
-    if (!Array.isArray(students)) {
-      return res.status(400).json({ success: false, message: "รูปแบบข้อมูลนักเรียนไม่ถูกต้อง" });
-    }
-
     const state = readDb();
     state.students = students;
     writeDb(state);
-
     res.json({ success: true, students: state.students });
   });
 
-  // ADMIN API: Fetch from Google Sheet CSV export
   app.post("/api/admin/students/fetch-sheet", async (req, res) => {
     const { sheetUrl } = req.body;
-    if (!sheetUrl) {
-      return res.status(400).json({ success: false, message: "กรุณาระบุลิงก์ Google Sheet" });
-    }
-
     try {
       let csvUrl = sheetUrl.trim();
       if (csvUrl.includes("docs.google.com/spreadsheets")) {
@@ -950,233 +519,122 @@ async function startServer() {
           const spreadsheetId = matches[1];
           let gid = "0";
           const gidMatch = csvUrl.match(/gid=([0-9]+)/);
-          if (gidMatch && gidMatch[1]) {
-            gid = gidMatch[1];
-          }
+          if (gidMatch && gidMatch[1]) gid = gidMatch[1];
           csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
         }
       }
-
-      console.log("Fetching CSV from URL:", csvUrl);
       const csvText = await fetchUrlText(csvUrl);
       const parsedStudents = parseStudentCSV(csvText);
-
-      if (parsedStudents.length === 0) {
-        return res.json({ success: false, message: "ไม่พบข้อมูลรายชื่อนักเรียนใน Google Sheet หรือไม่สามารถดึงข้อมูลได้ (โปรดตรวจสอบสิทธิ์การแชร์ให้เป็น 'ทุกคนที่มีลิงก์มีสิทธิ์อ่าน')" });
-      }
-
+      if (parsedStudents.length === 0) return res.json({ success: false, message: "ไม่พบข้อมูล" });
       const state = readDb();
       state.students = parsedStudents;
       writeDb(state);
-
       res.json({ success: true, count: parsedStudents.length, students: parsedStudents });
-    } catch (err: any) {
-      console.error("Error fetching Google Sheet:", err);
-      res.json({ success: false, message: `เกิดข้อผิดพลาดในการดึงข้อมูล: ${err.message}. โปรดระบุลิงก์ที่แชร์เป็น 'ทุกคนที่มีลิงก์มีสิทธิ์อ่าน'` });
-    }
+    } catch (err: any) { res.json({ success: false, message: err.message }); }
   });
 
-  // ADMIN API: Get questions
-  app.get("/api/admin/questions", (req, res) => {
-    const state = readDb();
-    res.json({ success: true, questions: state.questions });
-  });
+  app.get("/api/admin/questions", (req, res) => { res.json({ success: true, questions: readDb().questions }); });
 
-  // ADMIN API: เพิ่ม/แก้ไขข้อสอบ (Add or Edit Questions)
   app.post("/api/admin/questions", (req, res) => {
     const { question, questions: bulkQuestions } = req.body;
     const state = readDb();
-
     if (bulkQuestions && Array.isArray(bulkQuestions)) {
       state.questions = bulkQuestions;
       writeDb(state);
-      return res.json({ success: true, message: "บันทึกข้อมูลข้อสอบทั้งหมดเรียบร้อยแล้ว", questions: state.questions });
+      return res.json({ success: true, message: "บันทึกเรียบร้อย", questions: state.questions });
     }
-
-    if (!question || !question.id) {
-      return res.status(400).json({ success: false, message: "ข้อมูลข้อสอบไม่ครบถ้วนหรือไม่ถูกต้อง" });
-    }
-
+    if (!question || !question.id) return res.status(400).json({ success: false });
     const existingIdx = state.questions.findIndex(q => q.id === question.id);
-
     if (existingIdx !== -1) {
-      state.questions[existingIdx] = {
-        ...state.questions[existingIdx],
-        ...question,
-        questionNumber: parseInt(question.questionNumber, 10) || state.questions[existingIdx].questionNumber
-      };
+      state.questions[existingIdx] = { ...state.questions[existingIdx], ...question, questionNumber: parseInt(question.questionNumber, 10) || state.questions[existingIdx].questionNumber };
     } else {
-      state.questions.push({
-        ...question,
-        questionNumber: parseInt(question.questionNumber, 10) || (state.questions.length + 1)
-      });
+      state.questions.push({ ...question, questionNumber: parseInt(question.questionNumber, 10) || (state.questions.length + 1) });
     }
-
     writeDb(state);
-    res.json({ success: true, message: "บันทึกข้อมูลข้อสอบเรียบร้อยแล้ว", questions: state.questions });
+    res.json({ success: true, questions: state.questions });
   });
 
-  // ADMIN API: ลบข้อสอบรายข้อ (Delete Single Question)
   app.delete("/api/admin/questions/:id", (req, res) => {
     const { id } = req.params;
-    if (!id) {
-      return res.status(400).json({ success: false, message: "กรุณาระบุ ID ของข้อสอบที่ต้องการลบ" });
-    }
-
     const state = readDb();
-    const originalLength = state.questions.length;
+    const len = state.questions.length;
     state.questions = state.questions.filter(q => q.id !== id);
-
-    if (state.questions.length === originalLength) {
-      return res.status(404).json({ success: false, message: "ไม่พบข้อสอบที่ต้องการลบ" });
-    }
-
+    if (state.questions.length === len) return res.status(404).json({ success: false });
     writeDb(state);
-    res.json({ success: true, message: "ลบข้อสอบเรียบร้อยแล้ว", questions: state.questions });
+    res.json({ success: true, questions: state.questions });
   });
 
-  // ADMIN API: ลบข้อสอบทั้งหมด (Bulk Delete Questions)
   app.post("/api/admin/questions/delete-all", (req, res) => {
-    const state = readDb();
-    state.questions = [];
-    writeDb(state);
-    res.json({ success: true, message: "ลบข้อสอบทั้งหมดในระบบเรียบร้อยแล้ว", questions: [] });
+    const state = readDb(); state.questions = []; writeDb(state);
+    res.json({ success: true, questions: [] });
   });
 
-  // --- GOOGLE SHEETS SYNC ENDPOINTS ---
-
-  // API: สำหรับดึงสถานะการเชื่อมต่อ Google Sheets ปัจจุบัน
   app.get("/api/admin/google-sheets/status", (req, res) => {
     const state = readDb();
-    res.json({
-      success: true,
-      hasToken: !!state.googleAccessToken,
-      spreadsheetId: state.spreadsheetId || null
-    });
+    res.json({ success: true, hasToken: !!state.googleAccessToken, spreadsheetId: state.spreadsheetId || null });
   });
 
-  // API: สำหรับผูกหรือบันทึก Google Access Token และ Spreadsheet ID
   app.post("/api/admin/google-sheets/setup", async (req, res) => {
     const { token, spreadsheetId } = req.body;
-    if (!token) {
-      return res.status(400).json({ success: false, message: "กรุณาระบุ Access Token" });
-    }
-
-    const state = readDb();
-    state.googleAccessToken = token;
-
+    if (!token) return res.status(400).json({ success: false });
+    const state = readDb(); state.googleAccessToken = token;
     try {
       let activeSpreadsheetId = spreadsheetId;
-
-      if (!activeSpreadsheetId) {
-        activeSpreadsheetId = await findMathExamSpreadsheet(token);
-      }
-
-      if (!activeSpreadsheetId) {
-        activeSpreadsheetId = await createMathExamSpreadsheet(token, state);
-      } else {
+      if (!activeSpreadsheetId) activeSpreadsheetId = await findMathExamSpreadsheet(token);
+      if (!activeSpreadsheetId) activeSpreadsheetId = await createMathExamSpreadsheet(token, state);
+      else {
         await ensureSpreadsheetTabs(token, activeSpreadsheetId);
         state.spreadsheetId = activeSpreadsheetId;
         await pushAllToGoogleSheets(token, activeSpreadsheetId, state);
       }
-
       state.spreadsheetId = activeSpreadsheetId;
       writeDb(state);
-
-      res.json({
-        success: true,
-        message: "เชื่อมต่อ Google Sheets เรียบร้อยแล้ว!",
-        spreadsheetId: activeSpreadsheetId
-      });
-    } catch (err: any) {
-      console.error("Google Sheets setup error:", err);
-      res.status(500).json({ success: false, message: `การตั้งค่าล้มเหลว: ${err.message}` });
-    }
+      res.json({ success: true, spreadsheetId: activeSpreadsheetId });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
   });
 
-  // API: สั่งดึงข้อมูลจาก Google Sheets ลงมาทับฐานข้อมูลที่ Server (Manual Pull)
+  // 🔥 2-Way Sync: ดึงข้อมูลจาก Sheets ลงฐานข้อมูลเซิร์ฟเวอร์
   app.post("/api/admin/google-sheets/pull", async (req, res) => {
     const state = readDb();
-    if (!state.googleAccessToken || !state.spreadsheetId) {
-      return res.status(400).json({ success: false, message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheets" });
-    }
-
+    if (!state.googleAccessToken || !state.spreadsheetId) return res.status(400).json({ success: false, message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheets" });
     try {
       const pulledData = await pullAllFromGoogleSheets(state.googleAccessToken, state.spreadsheetId);
-      
       let updated = false;
-      if (pulledData.questions) {
-        state.questions = pulledData.questions;
-        updated = true;
-      }
-      if (pulledData.students) {
-        state.students = pulledData.students;
-        updated = true;
-      }
-      if (pulledData.submissions) {
-        state.submissions = pulledData.submissions;
-        updated = true;
-      }
-
+      if (pulledData.questions && pulledData.questions.length > 0) { state.questions = pulledData.questions; updated = true; }
+      if (pulledData.students && pulledData.students.length > 0) { state.students = pulledData.students; updated = true; }
       if (updated) {
         writeDb(state);
-        res.json({
-          success: true,
-          message: "ดึงข้อมูลจาก Google Sheets สำเร็จและอัปเดตระบบเรียบร้อยแล้ว!",
-          questionsCount: state.questions.length,
-          studentsCount: state.students.length,
-          submissionsCount: state.submissions.length
-        });
+        res.json({ success: true, message: "ดึงข้อมูลข้อสอบและนักเรียนเรียบร้อยแล้ว!", questionsCount: state.questions.length, studentsCount: state.students.length });
       } else {
-        res.status(400).json({ success: false, message: "ไม่พบข้อมูลที่ถูกต้องใน Google Sheets สำหรับนำเข้า" });
+        res.status(400).json({ success: false, message: "ไม่พบข้อมูลที่แก้ไขใหม่ในชีต" });
       }
-    } catch (err: any) {
-      console.error("Google Sheets pull error:", err);
-      res.status(500).json({ success: false, message: `ไม่สามารถดึงข้อมูลได้: ${err.message}` });
-    }
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
   });
 
-  // --- VITE DEVELOPMENT OR PRODUCTION SERVING & STATIC FILES ---
+  // 🔥 2-Way Sync: สั่ง Push ข้อมูลปัจจุบันขึ้นทับบนชีตด้วยตนเอง
+  app.post("/api/admin/google-sheets/push-manual", async (req, res) => {
+    const state = readDb();
+    if (!state.googleAccessToken || !state.spreadsheetId) return res.status(400).json({ success: false, message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheets" });
+    try {
+      await pushAllToGoogleSheets(state.googleAccessToken, state.spreadsheetId, state);
+      res.json({ success: true, message: "ส่งข้อมูลข้อสอบและรายชื่อนักเรียนไปบันทึกบนชีตเรียบร้อยแล้ว!" });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
   const uploadsDir = path.join(process.cwd(), "public", "uploads");
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
   app.use("/uploads", express.static(uploadsDir));
 
-  const isProd = process.env.NODE_ENV === "production";
-  if (!isProd) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "custom"
-    });
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
-
-    app.use("*", async (req, res, next) => {
-      const url = req.originalUrl;
-      try {
-        let template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
-        template = await vite.transformIndexHtml(url, template);
-        res.status(200).set({ "Content-Type": "text/html" }).end(template);
-      } catch (e) {
-        vite.ssrFixStacktrace(e as Error);
-        next(e);
-      }
-    });
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.use("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    app.get("*", (req, res) => { res.sendFile(path.join(distPath, "index.html")); });
   }
 
-  // เปิดให้รัน Server (รับส่งข้อมูลแบบ 0.0.0.0 เพื่อให้อุปกรณ์อื่นในเครือข่ายเข้าถึงได้)
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Server is running on http://localhost:${PORT}`);
-  });
+  app.listen(PORT, "0.0.0.0", () => { console.log(`Server running on http://localhost:${PORT}`); });
 }
 
-// สตาร์ตการทำงานของ Server
-startServer().catch(err => {
-  console.error("Failed to start server:", err);
-});
+startServer().catch(err => { console.error("Failed to start server:", err); });

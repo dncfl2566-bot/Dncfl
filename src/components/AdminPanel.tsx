@@ -89,7 +89,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       fetchExamSettings();
     }
   };
-  // --- เพิ่มสถานะควบคุมเปิด-ปิดระบบสอบ ---
+  // --- ตัวแปรและฟังก์ชันควบคุมเปิด-ปิดระบบสอบ ---
   const [examSettings, setExamSettings] = useState<Record<string, boolean>>({
     '3': true,
     '5': true,
@@ -97,7 +97,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     '6/8': true
   });
 
-  // ฟังก์ชันดึงค่าสถานะการเปิด-ปิด จากหลังบ้าน
   const fetchExamSettings = async () => {
     try {
       const res = await fetch('/api/admin/settings');
@@ -110,13 +109,9 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // ฟังก์ชันสำหรับกดปุ่มสลับเปิด-ปิดระบบสอบ
   const handleToggleExam = async (gradeLevel: string, isOpen: boolean) => {
     const updatedSettings = { ...examSettings, [gradeLevel]: isOpen };
-
-    // แสดงผลบนจอทันที (เพื่อความเร็ว)
     setExamSettings(updatedSettings);
-
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'POST',
@@ -125,14 +120,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg(`บันทึกการตั้งค่าระบบสอบ ม.${gradeLevel} สำเร็จ`, 'success');
+        alert(`บันทึกการตั้งค่าระบบสอบ ม.${gradeLevel} สำเร็จ`);
       } else {
-        showMsg(data.message || 'บันทึกสถานะไม่สำเร็จ', 'error');
-        fetchExamSettings(); // หากเซฟไม่สำเร็จ ให้ดึงค่าเดิมกลับคืนมาแสดง
+        alert(data.message || 'บันทึกสถานะไม่สำเร็จ');
+        fetchExamSettings();
       }
     } catch (err) {
-      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
-      fetchExamSettings(); // ดึงค่าเดิมกลับคืนมาแสดง
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      fetchExamSettings();
     }
   };
 

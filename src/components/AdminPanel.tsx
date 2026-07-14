@@ -467,7 +467,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       
       // Clear current contents of A:E
       const clearRange = 'Sheet1!A:E';
-      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${googleAccessToken}`,
@@ -491,7 +491,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
 
       const updateRange = 'Sheet1!A1';
-      const url = `https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
 
       const res = await fetch(url, {
         method: 'PUT',
@@ -529,7 +529,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       
       // Try to create the 'รายงานคะแนนสอบ' sheet tab (errors if already exists, which we catch and ignore)
       try {
-        await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}:batchUpdate`, {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${googleAccessToken}`,
@@ -553,7 +553,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
 
       // Clear existing content in 'รายงานคะแนนสอบ' A:K
       const clearRange = 'รายงานคะแนนสอบ!A:K';
-      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${googleAccessToken}`,
@@ -607,7 +607,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
 
       const updateRange = 'รายงานคะแนนสอบ!A1';
-      const url = `https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
 
       const res = await fetch(url, {
         method: 'PUT',

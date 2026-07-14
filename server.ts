@@ -5,15 +5,15 @@ import { createServer as createViteServer } from "vite";
 import { getInitialQuestions, getInitialStudents } from "./src/data/initialQuestions";
 import { Student, Question, Submission, SystemState } from "./src/types";
 
-// --- เพิ่มส่วนเชื่อมต่อ FIREBASE FIRESTORE ---
+// --- เชื่อมต่อ FIREBASE FIRESTORE ---
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 import firebaseConfig from "./firebase-applet-config.json";
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
-const DOC_REF = doc(db, "system", "state"); // เก็บ state ทั้งหมดไว้ใน collection ชื่อ system id ชื่อ state
-// ------------------------------------------
+const DOC_REF = doc(db, "system", "state"); 
+// ----------------------------------
 
 import http from "http";
 import https from "https";
@@ -111,10 +111,9 @@ function fetchUrlText(url: string): Promise<string> {
   });
 }
 
-// Global cached state variables
 let cachedDbState: SystemState | null = null;
 
-// เปลี่ยนเป็น Async Function เพื่อไปดึงข้อมูลจาก Cloud Firebase
+// อ่านข้อมูลจาก Firebase
 async function readDb(): Promise<SystemState> {
   if (cachedDbState) {
     return cachedDbState;
@@ -164,7 +163,7 @@ async function readDb(): Promise<SystemState> {
   return state;
 }
 
-// เปลี่ยนเป็นเซฟข้อมูลลง Firebase ถาวร
+// เซฟข้อมูลลง Firebase
 async function writeDb(state: SystemState) {
   cachedDbState = state;
   try {
@@ -197,7 +196,6 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '50mb' }));
 
-  // Initialize DB from cloud on startup
   await readDb();
 
   // API: Student Login
@@ -256,7 +254,7 @@ async function startServer() {
     });
   });
 
-  // API: Submit student exam answers
+  // API: Submit student answers
   app.post("/api/submit", async (req, res) => {
     const {
       studentId,
@@ -324,7 +322,6 @@ async function startServer() {
     };
 
     state.submissions.push(submission);
-    
     await writeDb(state);
 
     res.json({ success: true, submission });
@@ -355,7 +352,7 @@ async function startServer() {
     res.json({ success: true, message: "ลบกระดาษคำตอบของนักเรียนเรียบร้อยแล้ว" });
   });
 
-  // ADMIN API: Upload local image (Base64)
+  // ADMIN API: Upload image (Base64)
   app.post("/api/admin/upload", (req, res) => {
     const { imageBase64, filename } = req.body;
     if (!imageBase64) {
@@ -379,7 +376,7 @@ async function startServer() {
       res.json({ success: true, url: `/uploads/${uniqueFilename}` });
     } catch (err: any) {
       console.error("Upload error:", err);
-      res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดทางเซิร์ฟเวอร์ในการบันทึกรูปภาพ" });
+      res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการบันทึกรูปภาพ" });
     }
   });
 
@@ -458,13 +455,13 @@ async function startServer() {
     res.json({ success: true, submission: sub });
   });
 
-  // ADMIN API: Get student list
+  // ADMIN API: Get students
   app.get("/api/admin/students", async (req, res) => {
     const state = await readDb();
     res.json({ success: true, students: state.students });
   });
 
-  // ADMIN API: Import students manually
+  // ADMIN API: Import students
   app.post("/api/admin/students/import", async (req, res) => {
     const { students } = req.body;
     if (!Array.isArray(students)) {
@@ -505,7 +502,7 @@ async function startServer() {
       const parsedStudents = parseStudentCSV(csvText);
 
       if (parsedStudents.length === 0) {
-        return res.json({ success: false, message: "ไม่พบข้อมูลรายชื่อนักเรียนใน Google Sheet หรือไม่สามารถดึงข้อมูลได้" });
+        return res.json({ success: false, message: "ไม่พบข้อมูลรายชื่อนักเรียนใน Google Sheet" });
       }
 
       const state = await readDb();

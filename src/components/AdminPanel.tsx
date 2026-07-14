@@ -68,6 +68,39 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  // 🔥 ฟังก์ชันดึงข้อมูลจาก Google Sheets (Pull)
+  const handlePullFromSheet = async () => {
+    if (!confirm("⚠️ คำเตือน!\nคุณครูแน่ใจใช่หรือไม่ว่าต้องการดึงข้อมูลจาก Google Sheets?\nการทำงานนี้จะนำข้อสอบและรายชื่อนักเรียนจากในสเปรดชีตมา 'เขียนทับ' ข้อมูลปัจจุบันบนระบบทั้งหมด!")) return;
+    try {
+      const res = await fetch("/api/admin/google-sheets/pull", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        alert(`🎉 เชื่อมโยงสำเร็จ!\n- อัปเดตข้อสอบแล้ว: ${data.questionsCount} ข้อ\n- อัปเดตรายชื่อนักเรียนแล้ว: ${data.studentsCount} คน`);
+        window.location.reload(); // รีเฟรชหน้าจอเพื่อดึงข้อมูลใหม่มาแสดงผล
+      } else {
+        alert(`❌ ไม่สามารถดึงข้อมูลได้: ${data.message}`);
+      }
+    } catch (e) {
+      alert("❌ เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
+    }
+  };
+
+  // 🔥 ฟังก์ชันส่งข้อมูลขึ้น Google Sheets (Push)
+  const handlePushToSheet = async () => {
+    if (!confirm("คุณครูต้องการส่งข้อมูลข้อสอบและรายชื่อนักเรียนปัจจุบันขึ้นไปบันทึกบน Google Sheets ใช่หรือไม่?")) return;
+    try {
+      const res = await fetch("/api/admin/google-sheets/push-manual", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        alert(`🎉 บันทึกสำเร็จ!\n${data.message}`);
+      } else {
+        alert(`❌ เกิดข้อผิดพลาด: ${data.message}`);
+      }
+    } catch (e) {
+      alert("❌ เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
+    }
+  };
+  
   const handleToggleExam = async (gradeLevel: string, isOpen: boolean) => {
     const updatedSettings = { ...examSettings, [gradeLevel]: isOpen };
     setExamSettings(updatedSettings);

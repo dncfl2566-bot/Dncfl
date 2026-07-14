@@ -188,7 +188,21 @@ async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state
         sub.originalShortAnswers ? JSON.stringify(sub.originalShortAnswers) : ""
       ]);
     });
-
+// ตัวอย่างส่วนแปลงค่าในฟังก์ชัน pull จาก Google Sheets ใน server.ts
+const submissionsRows = valueRanges[2]?.values || []; // ลำดับอาร์เรย์ของตารางที่เก็บ Submissions
+if (submissionsRows.length > 1) {
+  state.submissions = submissionsRows.slice(1).map((row) => ({
+    id: row[0],
+    studentId: row[1],
+    studentName: row[2],
+    classroom: row[3],
+    score: Number(row[4]),
+    totalQuestions: Number(row[5]),
+    submittedAt: row[6],
+    // แมปคอลัมน์อื่น ๆ เพิ่มเติมให้ตรงตามที่บันทึกไว้ในแผ่น Google Sheets
+  }));
+}
+writeDb(state); // บันทึกลงฐานข้อมูลทดแทนค่าเดิมโดยข้อมูลไม่สูญหาย
     const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
       method: "POST",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },

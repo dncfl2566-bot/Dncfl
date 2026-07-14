@@ -48,6 +48,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: 'info' });
   const [searchQuery, setSearchQuery] = useState('');
+  
   // --- ตัวแปรและฟังก์ชันควบคุมเปิด-ปิดระบบสอบ ---
   const [examSettings, setExamSettings] = useState<Record<string, boolean>>({
     '3': true,
@@ -253,7 +254,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         setSheetUrl(data.url);
         localStorage.setItem('google_spreadsheet_url', data.url);
         showMsg(`เชื่อมต่อ Google Sheet เพื่อซิงก์ข้อสอบ รายชื่อนักเรียน และผลคะแนนสอบแบบเรียลไทม์สำเร็จแล้ว!`, 'success');
-        // Fetch fresh data that might have been synced/merged from the Sheet
         fetchData();
       }
     } catch (err) {
@@ -408,7 +408,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
 
     try {
-      // 1. Search for existing folder
       const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='Math Exam Images' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
       const searchRes = await fetch(searchUrl, {
         headers: { Authorization: `Bearer ${token}` }
@@ -422,7 +421,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         }
       }
 
-      // 2. Create new folder if not found
       const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
         method: 'POST',
         headers: {
@@ -444,7 +442,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       console.error('Error getting or creating Google Drive folder:', e);
     }
 
-    // Default fallback
     return 'root';
   };
 
@@ -456,7 +453,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     return '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods'; // Fallback
   };
 
-  // Upload image logic (Supports Google Drive Folder & Local backup)
   const handleUploadImageFile = async (file: File): Promise<string> => {
     if (googleAccessToken) {
       try {
@@ -483,7 +479,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           const fileData = await res.json();
           const fileId = fileData.id;
 
-          // Set anyone permissions to read image URL in exams
           await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
             method: 'POST',
             headers: {
@@ -503,7 +498,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       }
     }
 
-    // Local server upload fallback
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -531,17 +525,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     });
   };
 
-  // Sync Students to Google Sheet
   const syncStudentsToGoogleSheet = async (listToSync = students) => {
     if (!googleAccessToken) {
-      return; // Skip if not logged in
+      return;
     }
 
     setGoogleSyncing(true);
     try {
       const spreadsheetId = getCurrentSpreadsheetId();
-      
-      // Clear current contents of A:E
       const clearRange = 'Sheet1!A:E';
       await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
         method: 'POST',
@@ -551,7 +542,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         }
       });
 
-      // Prepare data
       const values = [
         ['รหัสนักเรียน (ID)', 'ชื่อ-นามสกุล', 'ชั้นเรียน', 'เลขที่', 'วันที่เพิ่มเข้าชีต']
       ];
@@ -592,7 +582,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // Sync Submissions and Grades to Google Sheet
   const syncSubmissionsToGoogleSheet = async () => {
     if (!googleAccessToken) {
       showMsg('กรุณาลงชื่อเข้าใช้ Google เพื่อซิงก์ข้อมูลรายงานคะแนน', 'error');
@@ -602,8 +591,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     setGoogleSyncing(true);
     try {
       const spreadsheetId = getCurrentSpreadsheetId();
-      
-      // Try to create the 'รายงานคะแนนสอบ' sheet tab (errors if already exists, which we catch and ignore)
       try {
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
           method: 'POST',
@@ -624,10 +611,9 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           })
         });
       } catch (err) {
-        // Ignored
+        // Ignored if sheet already exists
       }
 
-      // Clear existing content in 'รายงานคะแนนสอบ' A:K
       const clearRange = 'รายงานคะแนนสอบ!A:K';
       await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
         method: 'POST',
@@ -637,7 +623,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         }
       });
 
-      // Prepare data values
       const values = [
         [
           'รหัสนักเรียน',
@@ -708,7 +693,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // Delete submission
   const handleDeleteSubmission = (subId: string, name: string) => {
     setDeleteConfirmInfo({
       id: subId,
@@ -744,7 +728,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     setTimeout(() => setMessage({ text: '', type: 'info' }), 6000);
   };
 
-  // Google Sheet fetcher API
   const handleFetchGoogleSheet = async () => {
     if (!sheetUrl.trim()) {
       showMsg('กรุณากรอกลิงก์ Google Sheet', 'error');
@@ -778,7 +761,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // Student Save manual
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentForm.id.trim() || !studentForm.name.trim()) {
@@ -797,7 +779,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     if (editingStudent) {
       updatedList = updatedList.map(s => s.id === editingStudent.id ? newStudent : s);
     } else {
-      // Check if student id already exists
       if (students.some(s => s.id === newStudent.id)) {
         showMsg('รหัสนักเรียนนี้มีอยู่ในฐานข้อมูลแล้ว', 'error');
         return;
@@ -863,7 +844,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // Question save
   const handleSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!questionForm.text.trim() || !questionForm.correctAnswer.trim()) {
@@ -948,7 +928,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
       const data = await res.json();
       if (data.success) {
-        // Refresh question list
         const refreshedRes = await fetch('/api/admin/questions');
         const refreshedData = await refreshedRes.json();
         if (refreshedData.success) setQuestions(refreshedData.questions);
@@ -1060,7 +1039,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // Grade save
   const handleSaveGrade = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!gradingSubmission) return;
@@ -1094,14 +1072,12 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  // Export to CSV helper
   const handleExportCSV = () => {
     if (submissions.length === 0) {
       showMsg('ไม่มีข้อมูลผลการสอบเพื่อส่งออกในขณะนี้', 'error');
       return;
     }
 
-    // Build headers
     const csvRows = [
       [
         'รหัสนักเรียน',
@@ -1120,9 +1096,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       ].join(',')
     ];
 
-    // Add student results
     submissions.forEach(sub => {
-      // Calculate short answer sum
       let saSum = 0;
       Object.keys(sub.shortAnswerScores).forEach(qId => {
         saSum += sub.shortAnswerScores[qId] || 0;
@@ -1148,7 +1122,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       ].join(','));
     });
 
-    const csvContent = "\uFEFF" + csvRows.join('\n'); // Add BOM for excel Thai font support
+    const csvContent = "\uFEFF" + csvRows.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1159,7 +1133,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     document.body.removeChild(link);
   };
 
-  // Open Edit student form
   const openEditStudent = (s: Student) => {
     setEditingStudent(s);
     setStudentForm({
@@ -1182,7 +1155,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     setIsStudentModalOpen(true);
   };
 
-  // Open edit question form
   const openEditQuestion = (q: Question) => {
     setEditingQuestion(q);
     setQuestionForm({
@@ -1215,7 +1187,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     setIsQuestionModalOpen(true);
   };
 
-  // Open grading sheet
   const openGradingSheet = (sub: Submission) => {
     setGradingSubmission(sub);
     setGradingForm({
@@ -1228,7 +1199,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     });
   };
 
-  // Filters for lists
   const filteredStudents = students.filter(s => 
     s.name.includes(searchQuery) || s.id.includes(searchQuery) || s.class.includes(searchQuery)
   );
@@ -1341,7 +1311,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
 
         {/* Tab Buttons & Search bar */}
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex gap-2 w-full md:w-auto">
+          <div className="flex flex-wrap gap-2 w-full md:w-auto">
             <button
               onClick={() => { setActiveTab('submissions'); setSearchQuery(''); }}
               className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
@@ -1361,18 +1331,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
               <span>รายชื่อนักเรียน ({students.length})</span>
             </button>
             <button
-  onClick={() => {
-    setActiveTab('exam-settings');
-    setSearchQuery('');
-  }}
-  className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold transition-colors ${
-    activeTab === 'exam-settings'
-      ? 'bg-[#002B49] text-white'
-      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-  }`}
->
-  ⚙️ จัดการการสอบ
-</button>
+              onClick={() => { setActiveTab('exam-settings'); setSearchQuery(''); }}
+              className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+                activeTab === 'exam-settings' ? 'bg-[#002B49] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Award size={14} />
+              <span>ตั้งค่าเปิด-ปิดข้อสอบ</span>
+            </button>
             <button
               onClick={() => { setActiveTab('questions'); setSearchQuery(''); }}
               className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
@@ -1391,18 +1357,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
               <BarChart2 size={16} />
               <span>ภาพรวมรายห้อง ({Array.from(new Set(students.map(s => s.class))).length} ห้อง)</span>
             </button>
-            {/* ปุ่มควบคุมระบบเปิด-ปิดข้อสอบ */}
-<button 
-  onClick={() => { setActiveTab('exam-settings'); setSearchQuery(''); }} 
-  className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
-    activeTab === 'exam-settings' 
-      ? 'bg-[#002B49] text-white' 
-      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-  }`}
->
-  <Award size={14} />
-  <span>ตั้งค่าเปิด-ปิดข้อสอบ</span>
-</button>
           </div>
 
           <div className="relative w-full md:w-72">
@@ -1467,13 +1421,11 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredSubmissions.map(sub => {
-                      // Sum short answer score manually
                       let saScore = 0;
                       Object.keys(sub.shortAnswerScores).forEach(qId => {
                         saScore += sub.shortAnswerScores[qId] || 0;
                       });
 
-                      // Calculate student attempts
                       const studentSubs = submissions
                         .filter(s => s.studentId === sub.studentId)
                         .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
@@ -1535,7 +1487,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                                 type="button"
                                 id={`btn-grade-sub-${sub.id}`}
                                 onClick={() => openGradingSheet(sub)}
-                                className="px-3 py-1.5 bg-[#002B49] hover:bg-blue-950 text-white rounded font-bold text-[11px] transition-all"
+                                className="px-3 py-1.5 bg-[#002B49] hover:bg-blue-950 text-white rounded font-bold text-[11px] transition-all cursor-pointer"
                               >
                                 ตรวจและให้คะแนน
                               </button>
@@ -1560,6 +1512,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           </div>
         )}
 
+        {/* TAB VIEW: SUMMARY STATISTICS */}
         {activeTab === 'summary' && (
           <div className="space-y-6" id="tab-summary">
             {/* Top Stat Cards */}
@@ -1607,7 +1560,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {(() => {
-                  // Get all unique classes sorted
                   const uniqueClasses = Array.from(new Set(students.map(s => s.class))).sort();
                   const uniqueSubmitters = new Set(submissions.map(s => s.studentId));
 
@@ -1642,7 +1594,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           </span>
                         </div>
 
-                        {/* Progress bar */}
                         <div className="w-full bg-slate-200 rounded-full h-3.5 overflow-hidden border border-slate-300">
                           <div
                             className={`h-full transition-all duration-500 rounded-full ${
@@ -1654,7 +1605,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           />
                         </div>
 
-                        {/* Stats Info */}
                         <div className="grid grid-cols-3 gap-2 text-center">
                           <div className="bg-white p-2 rounded-lg border border-slate-200">
                             <span className="block text-[10px] text-slate-400 font-bold">ทั้งหมด</span>
@@ -1670,7 +1620,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           </div>
                         </div>
 
-                        {/* View Submitter Details */}
                         {submittedCount > 0 && (
                           <div className="space-y-2 bg-white p-3.5 rounded-lg border border-slate-200 mb-2">
                             <div className="text-[11px] font-bold text-green-700 flex items-center gap-1">
@@ -1700,7 +1649,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           </div>
                         )}
 
-                        {/* View Absentee Details */}
                         {absentCount > 0 ? (
                           <div className="space-y-2 bg-white p-3.5 rounded-lg border border-slate-200">
                             <div className="text-[11px] font-bold text-red-700 flex items-center gap-1">
@@ -1760,7 +1708,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   id="btn-fetch-sheet"
                   onClick={handleFetchGoogleSheet}
                   disabled={loading}
-                  className="px-6 py-2.5 bg-[#002B49] hover:bg-slate-800 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="px-6 py-2.5 bg-[#002B49] hover:bg-slate-800 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                   <span>ดึงข้อมูลจาก Google Sheet</span>
@@ -1784,7 +1732,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   type="button"
                   id="btn-add-student-modal"
                   onClick={openAddStudent}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end cursor-pointer"
                 >
                   <Plus size={14} />
                   <span>เพิ่มนักเรียนใหม่</span>
@@ -1822,14 +1770,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                             <button
                               type="button"
                               onClick={() => openEditStudent(s)}
-                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors"
+                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors cursor-pointer"
                             >
                               <Edit size={14} />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteStudent(s)}
-                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors"
+                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors cursor-pointer"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1857,7 +1805,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   <button
                     type="button"
                     onClick={handleBulkDeleteQuestions}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors self-end animate-fade-in"
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors self-end animate-fade-in cursor-pointer"
                   >
                     <Trash2 size={14} />
                     <span>ลบที่เลือก ({selectedQuestionIds.length} ข้อ)</span>
@@ -1867,7 +1815,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   type="button"
                   id="btn-add-question-modal"
                   onClick={openAddQuestion}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors self-end cursor-pointer"
                 >
                   <Plus size={14} />
                   <span>เพิ่มข้อสอบใหม่</span>
@@ -1958,14 +1906,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                             <button
                               type="button"
                               onClick={() => openEditQuestion(q)}
-                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors"
+                              className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-colors cursor-pointer"
                             >
                               <Edit size={14} />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteQuestion(q)}
-                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors"
+                              className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition-colors cursor-pointer"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1980,59 +1928,59 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
           </div>
         )}
 
-      </div>
-      {/* ==================== TAB VIEW 5: EXAM SYSTEM SETTINGS ==================== */}
-  {activeTab === 'exam-settings' && (
-    <div className="bg-white rounded-2xl shadow border border-slate-200 p-6 space-y-6" id="tab-exam-settings">
-      <div className="border-b border-slate-100 pb-3">
-        <h2 className="font-bold text-[#002B49] text-sm flex items-center gap-2">
-          <CheckSquare size={18} />
-          <span>ควบคุมการเปิด-ปิดระบบข้อสอบ (รายระดับชั้น)</span>
-        </h2>
-        <p className="text-xs text-slate-500 mt-1">
-          คุณครูสามารถควบคุมการเปิดหรือปิดห้องสอบของแต่ละระดับชั้นได้ที่นี่ นักเรียนในระดับชั้นที่ถูก "ปิด" จะไม่สามารถเข้าไปทำข้อสอบหรือล็อกอินได้
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {[
-          { key: '3', label: 'มัธยมศึกษาปีที่ 3 (ม.3/2)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.3' },
-          { key: '5', label: 'มัธยมศึกษาปีที่ 5 (ม.5/3, ม.5/5)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.5' },
-          { key: '6', label: 'มัธยมศึกษาปีที่ 6 (ม.6/3, ม.6/5)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.6 ปกติ' },
-          { key: '6/8', label: 'มัธยมศึกษาปีที่ 6 (ม.6/8)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.6/8 (เรียนเฉพาะทาง)' },
-        ].map((exam) => (
-          <div key={exam.key} className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex justify-between items-center transition-all hover:shadow-xs">
-            <div>
-              <h3 className="font-bold text-slate-800 text-xs">{exam.label}</h3>
-              <p className="text-[10px] text-slate-500 mt-0.5">{exam.desc}</p>
+        {/* TAB VIEW 5: EXAM SYSTEM SETTINGS */}
+        {activeTab === 'exam-settings' && (
+          <div className="bg-white rounded-2xl shadow border border-slate-200 p-6 space-y-6" id="tab-exam-settings">
+            <div className="border-b border-slate-100 pb-3">
+              <h2 className="font-bold text-[#002B49] text-sm flex items-center gap-2">
+                <CheckSquare size={18} />
+                <span>ควบคุมการเปิด-ปิดระบบข้อสอบ (รายระดับชั้น)</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                คุณครูสามารถควบคุมการเปิดหรือปิดห้องสอบของแต่ละระดับชั้นได้ที่นี่ นักเรียนในระดับชั้นที่ถูก "ปิด" จะไม่สามารถเข้าไปทำข้อสอบหรือล็อกอินได้
+              </p>
             </div>
-            <div className="flex items-center gap-3">
-              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                examSettings[exam.key] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-              }`}>
-                {examSettings[exam.key] ? '🟢 กำลังเปิดสอบ' : '🔴 ปิดระบบสอบ'}
-              </span>
-              
-              <button
-                type="button"
-                onClick={() => handleToggleExam(exam.key, !examSettings[exam.key])}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                  examSettings[exam.key] ? 'bg-blue-600' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                    examSettings[exam.key] ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[
+                { key: '3', label: 'มัธยมศึกษาปีที่ 3 (ม.3/2)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.3' },
+                { key: '5', label: 'มัธยมศึกษาปีที่ 5 (ม.5/3, ม.5/5)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.5' },
+                { key: '6', label: 'มัธยมศึกษาปีที่ 6 (ม.6/3, ม.6/5)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.6 ปกติ' },
+                { key: '6/8', label: 'มัธยมศึกษาปีที่ 6 (ม.6/8)', desc: 'ควบคุมสิทธิ์การเข้าทำข้อสอบห้อง ม.6/8 (เรียนเฉพาะทาง)' },
+              ].map((exam) => (
+                <div key={exam.key} className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex justify-between items-center transition-all hover:shadow-xs">
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-xs">{exam.label}</h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5">{exam.desc}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                      examSettings[exam.key] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {examSettings[exam.key] ? '🟢 กำลังเปิดสอบ' : '🔴 ปิดระบบสอบ'}
+                    </span>
+                    
+                    <button
+                      type="button"
+                      onClick={() => handleToggleExam(exam.key, !examSettings[exam.key])}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        examSettings[exam.key] ? 'bg-blue-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                          examSettings[exam.key] ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        ))}
+        )}
+
       </div>
-    </div>
-  )}
-  {/* ========================================================================= */}
 
       {/* MODAL 1: ADD / EDIT STUDENT */}
       {isStudentModalOpen && (
@@ -2043,7 +1991,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                 <Users size={18} />
                 <span>{editingStudent ? 'แก้ไขข้อมูลนักเรียน' : 'เพิ่มข้อมูลนักเรียนใหม่'}</span>
               </h3>
-              <button onClick={() => setIsStudentModalOpen(false)} className="text-white/80 hover:text-white">
+              <button onClick={() => setIsStudentModalOpen(false)} className="text-white/80 hover:text-white cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -2105,14 +2053,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   type="button"
                   id="btn-cancel-student"
                   onClick={() => setIsStudentModalOpen(false)}
-                  className="w-1/3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
+                  className="w-1/3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
                   id="btn-submit-student"
-                  className="w-2/3 py-2 bg-[#002B49] text-white rounded font-bold transition-colors shadow hover:bg-blue-950"
+                  className="w-2/3 py-2 bg-[#002B49] text-white rounded font-bold transition-colors shadow hover:bg-blue-950 cursor-pointer"
                 >
                   บันทึกข้อมูล
                 </button>
@@ -2131,7 +2079,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                 <Database size={18} />
                 <span>{editingQuestion ? 'แก้ไขข้อมูลข้อสอบ' : 'เพิ่มข้อสอบใหม่'}</span>
               </h3>
-              <button onClick={() => setIsQuestionModalOpen(false)} className="text-white/80 hover:text-white">
+              <button onClick={() => setIsQuestionModalOpen(false)} className="text-white/80 hover:text-white cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -2193,7 +2141,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
 
               <div className="space-y-1.5">
                 <label className="block text-slate-700 font-semibold">โจทย์คำถาม (พิมพ์ข้อความ)</label>
-                {/* Math Symbol Helper Toolbar for Teacher */}
                 <div className="flex flex-wrap gap-1 bg-slate-50 p-2.5 rounded-t border border-b-0 border-slate-300">
                   <span className="text-[10px] text-[#002B49] font-bold w-full mb-1">💡 เครื่องหมายคณิตศาสตร์ & เทมเพลต LaTeX (คลิกพิมพ์ใส่ช่องที่กำลังเลือก - โจทย์, ตัวเลือก หรือเฉลย):</span>
                   {[
@@ -2236,7 +2183,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-b focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
                 />
 
-                {/* Question Live math preview for teacher */}
                 {questionForm.text && (
                   <div className="mt-1.5 bg-slate-50 p-2 border border-slate-200 rounded text-xs">
                     <span className="text-slate-400 block text-[9px] font-bold">พรีวิวการแสดงผลตัวโจทย์ (Live Preview):</span>
@@ -2299,7 +2245,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                 )}
               </div>
 
-              {/* Multiple Choice specific input */}
               {questionForm.type === 'multiple-choice' && (
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3.5">
                   <p className="text-[11px] text-[#002B49] font-bold">กำหนดตัวเลือกตอบ ก ข ค ง (และ จ ถ้าต้องการ) พร้อมรูปภาพตัวเลือก:</p>
@@ -2352,7 +2297,6 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                         </div>
                       </div>
 
-                      {/* Choice Live math preview */}
                       {choiceText && (
                         <div className="ml-16 mt-1 bg-slate-50/50 p-1.5 border border-slate-200 rounded text-[10px] flex items-center gap-2">
                           <span className="text-slate-400 font-bold shrink-0">พรีวิวคณิตศาสตร์:</span>
@@ -2436,11 +2380,10 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   id="form-q-ans"
                   onChange={(e) => setQuestionForm({ ...questionForm, correctAnswer: e.target.value })}
                   onFocus={() => setFocusedInputId('form-q-ans')}
-                  placeholder={questionForm.type === 'multiple-choice' ? 'พิมพ์ข้อความตัวเลือกที่ถูกต้องเป๊ะๆ (เช่น 30 หรือ ตารางเซนติเมตร)' : 'พิมพ์เฉลยตัวเลข'}
+                  placeholder={questionForm.type === 'multiple-choice' ? 'พิมพ์ข้อความตัวเลือกที่ถูกต้องเป๊ะๆ' : 'พิมพ์เฉลยตัวเลข'}
                   className="w-full px-3 py-2 bg-red-50/50 border border-red-200 rounded focus:outline-none focus:ring-1 focus:ring-red-500 font-medium"
                 />
 
-                {/* Correct Answer Live math preview */}
                 {questionForm.correctAnswer && (
                   <div className="mt-1 bg-red-50/20 p-2 border border-red-200/50 rounded text-xs flex items-center gap-2">
                     <span className="text-red-500 font-bold shrink-0">พรีวิวเฉลยคณิตศาสตร์:</span>
@@ -2456,14 +2399,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   type="button"
                   id="btn-cancel-q"
                   onClick={() => setIsQuestionModalOpen(false)}
-                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
+                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
                   id="btn-submit-q"
-                  className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow"
+                  className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow cursor-pointer"
                 >
                   บันทึกข้อสอบ
                 </button>
@@ -2478,21 +2421,19 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full overflow-hidden my-8 flex flex-col max-h-[90vh]">
             
-            {/* Header */}
             <div className="bg-gradient-to-r from-red-800 to-[#D22630] text-white p-5 shrink-0 flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-sm">ตรวจและให้คะแนนกระดาษคำตอบวิชาคณิตศาสตร์</h3>
                 <p className="text-[11px] text-white/80">นักเรียน: {gradingSubmission.name} (รหัส: {gradingSubmission.studentId}) | ม.{gradingSubmission.class} เลขที่ {gradingSubmission.number}</p>
               </div>
-              <button onClick={() => setGradingSubmission(null)} className="text-white/80 hover:text-white">
+              <button onClick={() => setGradingSubmission(null)} className="text-white/80 hover:text-white cursor-pointer">
                 <X size={20} />
               </button>
             </div>
 
-            {/* Grading Form Content */}
             <form onSubmit={handleSaveGrade} className="p-6 overflow-y-auto space-y-6 text-xs font-semibold flex-grow">
               
-              {/* Cheat warning block / Control */}
+              {/* Cheat warning block */}
               <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${gradingForm.cheated ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
                 <div className="flex gap-2.5 items-start">
                   <AlertOctagon size={18} className={`${gradingForm.cheated ? 'text-red-600' : 'text-green-600'} mt-0.5 shrink-0`} />
@@ -2500,8 +2441,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                     <h4 className="font-bold">{gradingForm.cheated ? '⚠️ ตรวจพบการออกจากหน้าระบบข้อสอบเกินกำหนด (ระบบล็อกคะแนนเป็น 0)' : '✅ ตรวจสอบสถานะการทุจริต: ปกติ'}</h4>
                     <p className={`font-medium mt-1 text-[11px] ${gradingForm.cheated ? 'text-red-600' : 'text-green-700'}`}>
                       {gradingForm.cheated 
-                        ? `นักเรียนสลับหน้าจอหรือสลับแท็บครบ ${gradingSubmission.cheatingWarningsCount} ครั้ง (คุณครูสามารถเอาเครื่องหมายถูกออกเพื่อยกเลิกการปรับเป็น 0 คะแนนและคืนสิทธิ์ให้ระบบคำนวณตามจริงได้)` 
-                        : `นักเรียนสอบตามกฎกติกาปกติ มีการเตือนสลับหน้าต่าง ${gradingSubmission.cheatingWarningsCount} ครั้ง (คุณครูสามารถทำเครื่องหมายถูกเพื่อปรับเป็นทุจริตได้ตามดุลยพินิจ)`}
+                        ? `นักเรียนสลับหน้าจอหรือสลับแท็บครบ ${gradingSubmission.cheatingWarningsCount} ครั้ง (คุณครูสามารถเอาเครื่องหมายถูกออกเพื่อคืนสิทธิ์คำนวณตามจริงได้)` 
+                        : `นักเรียนสอบตามกฎกติกาปกติ มีการเตือนสลับหน้าต่าง ${gradingSubmission.cheatingWarningsCount} ครั้ง`}
                     </p>
                   </div>
                 </div>
@@ -2510,9 +2451,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                     type="checkbox"
                     id="grading-cheated-toggle"
                     checked={gradingForm.cheated}
-                    onChange={(e) => {
-                      setGradingForm(prev => ({ ...prev, cheated: e.target.checked }));
-                    }}
+                    onChange={(e) => setGradingForm(prev => ({ ...prev, cheated: e.target.checked }))}
                     className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500 cursor-pointer"
                   />
                   <label htmlFor="grading-cheated-toggle" className="text-xs font-bold text-slate-800 cursor-pointer select-none">
@@ -2528,12 +2467,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                   <span className="text-[#002B49]">ประเมินแล้ว: {gradingForm.cheated ? 0 : gradingSubmission.multipleChoiceScore} / 15 คะแนน</span>
                 </div>
                 <div className="p-4 bg-slate-50 space-y-4">
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    * ตรวจคะแนนปรนัยแบบเรียลไทม์ {gradingForm.cheated ? '(ทุจริตเป็น 0 คะแนน)' : `นักเรียนทำถูกต้อง ${gradingSubmission.multipleChoiceScore} ข้อ`} (คุณครูสามารถคลิกแก้ไขคำตอบเพื่อช่วยเหลือนักเรียนได้)
-                  </p>
-                  
                   <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3">
-                    <p className="text-xs font-bold text-slate-700 border-b pb-1">รายละเอียดคำตอบและการขอแก้ไขคำตอบ:</p>
+                    <p className="text-xs font-bold text-slate-700 border-b pb-1">รายละเอียดคำตอบและการแก้ไข:</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       {questions
                         .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'multiple-choice')
@@ -2542,28 +2477,18 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                           const currentAns = gradingForm.editedMultipleChoiceAnswers?.[q.id] || '';
                           const isCorrect = currentAns.toString().trim() === q.correctAnswer.toString().trim();
 
-                          // Find which letter corresponds to the correctAnswer
-                          const correctIdx = q.choices ? q.choices.indexOf(q.correctAnswer) : -1;
-                          const correctLetter = correctIdx !== -1 ? ['ก', 'ข', 'ค', 'ง', 'จ'][correctIdx] : '';
-                          const correctLabel = correctLetter ? `${correctLetter}. ${q.correctAnswer}` : q.correctAnswer;
-
-                          // Find which letter corresponds to the originalAnswer
-                          const originalIdx = q.choices ? q.choices.indexOf(originalAns) : -1;
-                          const originalLetter = originalIdx !== -1 ? ['ก', 'ข', 'ค', 'ง', 'จ'][originalIdx] : '';
-                          const originalLabel = originalLetter ? `${originalLetter}. ${originalAns}` : (originalAns || '(ไม่ได้ตอบ)');
-
                           return (
                             <div key={q.id} className="p-2.5 rounded bg-slate-50 border border-slate-200 flex flex-col justify-between gap-1 text-[11px]">
                               <div className="flex justify-between items-start">
-                                <span className="font-bold text-slate-800">ข้อที่ {idx + 1}: {q.text.substring(0, 45)}...</span>
+                                <span className="font-bold text-slate-800">ข้อที่ {q.questionNumber}: <MathRenderer text={q.text.substring(0, 30)} />...</span>
                                 <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                                   {isCorrect ? 'ถูกต้อง' : 'ผิด'}
                                 </span>
                               </div>
-                              <p className="text-[10px] text-blue-800 font-bold bg-blue-50/50 p-1 rounded border border-blue-100/40">เฉลยคีย์หลัก: {correctLabel}</p>
-                              <p className="text-[10px] text-slate-400">คำตอบแรกเริ่มที่นักเรียนส่ง: <span className="font-bold font-mono text-slate-600">"{originalLabel}"</span></p>
+                              <p className="text-[10px] text-blue-800">เฉลย: {q.correctAnswer}</p>
+                              <p className="text-[10px] text-slate-500">ตอบเริ่มแรก: "{originalAns || 'ไม่ได้ตอบ'}"</p>
                               <div className="flex items-center gap-1.5 mt-1">
-                                <span className="text-[10px] text-slate-500 shrink-0 font-bold">แก้ไขคำตอบปัจจุบัน:</span>
+                                <span className="text-[10px] text-slate-500 shrink-0 font-bold">แก้ไขคำตอบ:</span>
                                 <select
                                   value={currentAns}
                                   onChange={(e) => {
@@ -2574,22 +2499,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                                       editedMultipleChoiceAnswers: updated
                                     }));
                                   }}
-                                  className="text-[11px] px-1.5 py-0.5 bg-white border border-slate-300 rounded font-bold focus:outline-none cursor-pointer max-w-[160px]"
+                                  className="text-[11px] px-1.5 py-0.5 bg-white border border-slate-300 rounded focus:outline-none"
                                 >
                                   <option value="">ไม่ได้ตอบ</option>
-                                  {q.choices?.map((choiceText, cIdx) => {
-                                    const letter = ['ก', 'ข', 'ค', 'ง', 'จ'][cIdx];
-                                    return (
-                                      <option key={cIdx} value={choiceText}>
-                                        {letter}. {choiceText}
-                                      </option>
-                                    );
-                                  })}
-                                  <option value="ก">ก (เลือกคีย์พยัญชนะ)</option>
-                                  <option value="ข">ข (เลือกคีย์พยัญชนะ)</option>
-                                  <option value="ค">ค (เลือกคีย์พยัญชนะ)</option>
-                                  <option value="ง">ง (เลือกคีย์พยัญชนะ)</option>
-                                  {q.choices?.[4] && <option value="จ">จ (เลือกคีย์พยัญชนะ)</option>}
+                                  {q.choices?.map((choice, oIdx) => (
+                                    <option key={oIdx} value={choice}>
+                                      {['ก', 'ข', 'ค', 'ง', 'จ'][oIdx]}. {choice}
+                                    </option>
+                                  ))}
                                 </select>
                               </div>
                             </div>
@@ -2600,173 +2517,124 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                 </div>
               </div>
 
-              {/* Short Answers Grading Module */}
+              {/* Short Answer (SA) Review */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200 flex justify-between">
+                  <span>ส่วนที่ 2: ตรวจคะแนนอัตนัยเติมคำ (10 ข้อ)</span>
+                </div>
+                <div className="p-4 bg-slate-50 space-y-4">
+                  <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      {questions
+                        .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'short-answer')
+                        .map((q) => {
+                          const originalAns = gradingSubmission.shortAnswers?.[q.id] || '';
+                          const currentScore = gradingForm.shortAnswerScores[q.id] || 0;
+
+                          return (
+                            <div key={q.id} className="p-2.5 rounded bg-slate-50 border border-slate-200 space-y-1.5 text-[11px]">
+                              <span className="font-bold text-slate-800">ข้อที่ {q.questionNumber}: <MathRenderer text={q.text.substring(0, 30)} />...</span>
+                              <p className="text-[10px] text-blue-800">เฉลย: {q.correctAnswer}</p>
+                              <p className="text-[10px] text-slate-500">คำตอบเด็ก: "{originalAns || 'ไม่ได้ตอบ'}"</p>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500">คะแนน:</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="1"
+                                  step="1"
+                                  value={currentScore}
+                                  onChange={(e) => {
+                                    const updated = { ...gradingForm.shortAnswerScores };
+                                    updated[q.id] = Number(e.target.value);
+                                    setGradingForm(prev => ({
+                                      ...prev,
+                                      shortAnswerScores: updated
+                                    }));
+                                  }}
+                                  className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-center"
+                                />
+                                <span className="text-slate-400 text-[10px]">(0 หรือ 1 คะแนน)</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Written Score (Show Method) Review */}
               <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200">
-                  ส่วนที่ 2: ให้คะแนนข้อสอบอัตนัยเติมคำตอบ (5 ข้อ - ข้อละ 2 คะแนน)
+                  ส่วนที่ 3: คะแนนการแสดงวิธีทำ (5 คะแนน)
                 </div>
-                <div className="p-4 bg-white divide-y divide-slate-100 space-y-4">
-                  {questions
-                    .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'short-answer')
-                    .map((q, idx) => {
-                      const originalAns = gradingSubmission.originalShortAnswers?.[q.id] || gradingSubmission.shortAnswers[q.id] || '';
-                      const currentAns = gradingForm.editedShortAnswers?.[q.id] || '';
-                      const isExactlyCorrect = currentAns.trim() === q.correctAnswer.trim();
-                      const currentScore = gradingForm.shortAnswerScores[q.id] || 0;
-
-                      return (
-                        <div key={q.id} className="pt-3 first:pt-0 flex flex-col md:flex-row justify-between gap-4 font-medium">
-                          <div className="space-y-1.5 w-2/3">
-                            <p className="text-slate-800 font-bold">ข้อที่ {idx + 1}: {q.text}</p>
-                            <p className="text-blue-800 font-bold">เฉลยระบบ: "{q.correctAnswer}"</p>
-                            <p className="text-[10px] text-slate-400">คำตอบแรกเริ่มที่นักเรียนส่ง: <span className="font-bold font-mono text-slate-600">"{originalAns || '(ไม่ได้ตอบ)'}"</span></p>
-                            <div className="flex items-center gap-1.5 text-slate-500 font-semibold mt-1">
-                              <span className="text-[10px] font-bold">แก้ไขคำตอบปัจจุบัน:</span>
-                              <input
-                                type="text"
-                                value={currentAns}
-                                onChange={(e) => {
-                                  const updated = { ...gradingForm.editedShortAnswers };
-                                  updated[q.id] = e.target.value;
-                                  setGradingForm(prev => ({
-                                    ...prev,
-                                    editedShortAnswers: updated
-                                  }));
-                                }}
-                                className="px-2 py-1 border border-slate-300 rounded font-bold font-mono text-xs w-48 bg-slate-50 focus:bg-white focus:outline-none"
-                                placeholder="พิมพ์แก้ไขคำตอบ..."
-                              />
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${isExactlyCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                {isExactlyCorrect ? 'ตรงกับคีย์' : 'ไม่ตรงคีย์'}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3 self-end md:self-center">
-                            <span className="text-xs text-slate-500">คะแนนเฉลย:</span>
-                            <div className="flex gap-1.5">
-                              <button
-                                type="button"
-                                id={`btn-score-0-${q.id}`}
-                                onClick={() => setGradingForm({
-                                  ...gradingForm,
-                                  shortAnswerScores: { ...gradingForm.shortAnswerScores, [q.id]: 0 }
-                                })}
-                                className={`w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${
-                                  currentScore === 0 ? 'bg-red-500 text-white border-red-500' : 'bg-white text-slate-500 hover:bg-slate-100'
-                                }`}
-                              >
-                                0
-                              </button>
-                              <button
-                                type="button"
-                                id={`btn-score-1-${q.id}`}
-                                onClick={() => setGradingForm({
-                                  ...gradingForm,
-                                  shortAnswerScores: { ...gradingForm.shortAnswerScores, [q.id]: 1 }
-                                })}
-                                className={`w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${
-                                  currentScore === 1 ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-500 hover:bg-slate-100'
-                                }`}
-                              >
-                                1
-                              </button>
-                              <button
-                                type="button"
-                                id={`btn-score-2-${q.id}`}
-                                onClick={() => setGradingForm({
-                                  ...gradingForm,
-                                  shortAnswerScores: { ...gradingForm.shortAnswerScores, [q.id]: 2 }
-                                })}
-                                className={`w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${
-                                  currentScore === 2 ? 'bg-green-500 text-white border-green-500' : 'bg-white text-slate-500 hover:bg-slate-100'
-                                }`}
-                              >
-                                2
-                              </button>
-                            </div>
-                          </div>
+                <div className="p-4 bg-slate-50 space-y-4">
+                  <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-3">
+                    {questions
+                      .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'written')
+                      .map((q) => (
+                        <div key={q.id} className="space-y-2">
+                          <p className="font-bold text-slate-800 text-[11px]">โจทย์ข้อที่ {q.questionNumber}: <MathRenderer text={q.text} /></p>
+                          <p className="text-[11px] text-blue-800 font-bold">แนวทางการเฉลย: {q.correctAnswer}</p>
                         </div>
-                      );
-                    })}
-                </div>
-              </div>
+                      ))}
 
-              {/* Written Drawing Grade */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200">
-                  ส่วนที่ 3: ตรวจกระดาษคำตอบแสดงวิธีทำ (1 ข้อ - เต็ม 5 คะแนน)
-                </div>
-                <div className="p-4 bg-white space-y-4">
-                  {/* Problem statement */}
-                  {questions
-                    .filter(q => q.gradeLevel === gradingSubmission.gradeLevel && q.set === gradingSubmission.set && q.type === 'written')
-                    .map(q => (
-                      <div key={q.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
-                        <p className="font-bold text-slate-800">โจทย์: {q.text}</p>
-                        <p className="text-blue-800 font-bold mt-1">แนวเฉลยคีย์วิธีทำ: {q.correctAnswer}</p>
-                      </div>
-                    ))}
-
-                  {/* Base64 canvas render */}
-                  <div className="bg-slate-100 border rounded-lg p-4 flex flex-col items-center justify-center">
-                    {gradingSubmission.writtenAnswer ? (
-                      <img
-                        src={gradingSubmission.writtenAnswer}
-                        alt="กระดาษทดแสดงวิธีทำของนักเรียน"
-                        className="max-h-64 object-contain border-2 bg-white rounded shadow-sm"
+                    <div className="space-y-1.5 pt-2">
+                      <label className="block text-slate-700">คำตอบ / บันทึกการทำของนักเรียน</label>
+                      <textarea
+                        value={gradingSubmission.writtenAnswer || 'ไม่มีการบันทึกวิธีทำในระบบ'}
+                        rows={4}
+                        disabled
+                        className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded text-xs font-semibold text-slate-600 focus:outline-none"
                       />
-                    ) : (
-                      <p className="text-slate-400 italic font-medium py-6">ไม่มีข้อมูลกระดาษวาดภาพตอบของนักเรียน</p>
-                    )}
-                  </div>
+                    </div>
 
-                  {/* Input score written */}
-                  <div className="flex items-center gap-3 justify-end pt-2">
-                    <span className="text-xs text-slate-700 font-bold">กรอกคะแนนส่วนวิธีทำ (0-5):</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={5}
-                      value={gradingForm.writtenScore}
-                      id="grading-written-score"
-                      onChange={(e) => setGradingForm({ ...gradingForm, writtenScore: Math.min(5, Math.max(0, Number(e.target.value))) })}
-                      className="w-20 px-3 py-1.5 bg-slate-50 border border-slate-300 rounded font-bold font-mono text-center focus:outline-none focus:ring-1 focus:ring-red-500"
-                    />
-                    <span className="text-slate-400 font-bold">/ 5 คะแนน</span>
+                    <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between pt-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800">ให้คะแนนวิธีทำข้อนี้:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="5"
+                          step="0.5"
+                          value={gradingForm.writtenScore}
+                          onChange={(e) => setGradingForm(prev => ({ ...prev, writtenScore: Number(e.target.value) }))}
+                          className="w-20 px-3 py-1 bg-white border border-slate-300 rounded text-center text-xs font-bold"
+                        />
+                        <span className="text-slate-400 text-[10px]">(คะแนนเต็ม 5 คะแนน)</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Feedback and comments */}
+              {/* General Feedback Box */}
               <div className="space-y-1.5">
-                <label className="block text-slate-700 font-bold">ข้อคิดเห็นและข้อเสนอแนะสำหรับการสอบครั้งนี้ (Feedback):</label>
+                <label className="block text-slate-700">ข้อความชี้แนะ / คำติชมของคุณครู (Feedback)</label>
                 <textarea
                   value={gradingForm.feedback}
-                  id="grading-feedback"
-                  onChange={(e) => setGradingForm({ ...gradingForm, feedback: e.target.value })}
-                  placeholder="เขียนคำชี้แนะหรือข้อติติงให้นักเรียนรู้แนวทางแก้ไขปัญหา..."
-                  rows={3}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+                  onChange={(e) => setGradingForm(prev => ({ ...prev, feedback: e.target.value }))}
+                  rows={2}
+                  placeholder="พิมพ์คำติชมหรือข้อแนะแนวทางให้นักเรียนได้ทราบ..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
                 />
               </div>
 
-              {/* Final grading action controls */}
-              <div className="flex gap-2.5 pt-4 border-t border-slate-100">
+              {/* Action Buttons */}
+              <div className="flex gap-2.5 pt-4 border-t border-slate-100 shrink-0">
                 <button
                   type="button"
-                  id="btn-cancel-grading"
                   onClick={() => setGradingSubmission(null)}
-                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
+                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold transition-colors cursor-pointer"
                 >
-                  ยกเลิกการตรวจ
+                  ยกเลิก
                 </button>
                 <button
                   type="submit"
-                  id="btn-submit-grading"
-                  className="w-2/3 py-2.5 bg-[#D22630] hover:bg-red-800 text-white rounded font-bold transition-colors shadow flex items-center justify-center gap-1.5"
+                  className="w-2/3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-colors shadow cursor-pointer"
                 >
-                  <Save size={14} />
-                  <span>บันทึกคะแนนรวมที่ประเมิน</span>
+                  บันทึกผลการตรวจวิเคราะห์กระดาษคำตอบ
                 </button>
               </div>
 
@@ -2775,48 +2643,47 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         </div>
       )}
 
-      {/* CUSTOM CONFIRMATION DIALOG MODAL */}
+      {/* MODAL 4: DELETE CONFIRMATION */}
       {deleteConfirmInfo && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[9999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-red-600 text-white p-4 font-bold flex items-center gap-2">
-              <AlertOctagon size={20} />
-              <span className="text-sm font-bold">ยืนยันการลบข้อมูล</span>
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full overflow-hidden border border-slate-200">
+            <div className="p-5 space-y-3">
+              <h3 className="text-xs font-bold text-red-600 flex items-center gap-1.5">
+                <AlertOctagon size={16} />
+                <span>ยืนยันการลบข้อมูลถาวร?</span>
+              </h3>
+              <p className="text-xs text-slate-600 font-medium">
+                คุณครูแน่ใจใช่หรือไม่ว่าต้องการลบข้อมูล <strong>{deleteConfirmInfo.name}</strong> ออกจากระบบคลังวิชาคณิตศาสตร์?
+                <br />
+                <span className="text-red-500 font-bold">* การดำเนินการนี้ไม่สามารถย้อนกลับคืนได้</span>
+              </p>
             </div>
-            <div className="p-6 space-y-4 font-sans text-xs">
-              <p className="text-slate-600 text-xs font-semibold">คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลนี้ออกจากระบบอย่างถาวร?</p>
-              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs font-mono font-bold text-slate-700 break-words">
-                {deleteConfirmInfo.name}
-              </div>
-              <p className="text-[10px] text-red-500 font-medium">* การดำเนินการนี้จะไม่สามารถดึงข้อมูลคืนกลับมาได้อีก</p>
-            </div>
-            <div className="bg-slate-50 px-6 py-4 flex gap-3 justify-end border-t border-slate-200">
+            <div className="bg-slate-50 px-5 py-3.5 flex gap-2 justify-end">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmInfo(null)}
-                className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                className="px-3.5 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded text-xs font-bold transition-all cursor-pointer"
               >
                 ยกเลิก
               </button>
               <button
                 type="button"
                 onClick={async () => {
-                  const { id, type } = deleteConfirmInfo;
+                  const info = deleteConfirmInfo;
                   setDeleteConfirmInfo(null);
-                  if (type === 'student') {
-                    await proceedDeleteStudent(id);
-                  } else if (type === 'bulk-questions') {
+                  if (info.type === 'student') {
+                    await proceedDeleteStudent(info.id);
+                  } else if (info.type === 'question') {
+                    await proceedDeleteQuestion(info.id);
+                  } else if (info.type === 'submission') {
+                    await proceedDeleteSubmission(info.id);
+                  } else if (info.type === 'bulk-questions') {
                     await proceedBulkDeleteQuestions();
-                  } else if (type === 'submission') {
-                    await proceedDeleteSubmission(id);
-                  } else {
-                    await proceedDeleteQuestion(id);
                   }
                 }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-bold transition-all cursor-pointer"
               >
-                <Trash2 size={13} />
-                <span>ยืนยันการลบ</span>
+                ยืนยันการลบ
               </button>
             </div>
           </div>

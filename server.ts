@@ -611,7 +611,19 @@ app.post('/api/admin/upload', async (req, res) => {
     const state = readDb();
     res.json({ success: true, hasToken: !!state.googleAccessToken, spreadsheetId: state.spreadsheetId || null });
   });
-
+// server.ts
+app.post("/api/admin/google-sheets/sync-questions", async (req, res) => {
+  const state = readDb();
+  if (!state.googleAccessToken) return res.status(400).json({ message: "กรุณาล็อกอิน Google ใหม่" });
+  
+  try {
+    // รันฟังก์ชันลูปเพื่อเขียนทับข้อมูลข้อสอบ (questions) ลงในแผ่นชีตเดิมทั้งหมดรวดเดียว
+    await pushQuestionsToSheet(state.questions, state.googleAccessToken);
+    res.json({ success: true, message: "ซิงค์ข้อสอบทั้งหมดเข้า Google Sheets เรียบร้อย!" });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
   app.post("/api/admin/google-sheets/setup", async (req, res) => {
     const { token, spreadsheetId } = req.body;
     if (!token) return res.status(400).json({ success: false });

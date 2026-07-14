@@ -79,13 +79,13 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg(`บันทึกการตั้งค่าระบบสอบ ม.${gradeLevel} สำเร็จ`, 'success');
+        alert(`บันทึกการตั้งค่าระบบสอบ ม.${gradeLevel} สำเร็จ`);
       } else {
-        showMsg(data.message || 'บันทึกสถานะไม่สำเร็จ', 'error');
+        alert(data.message || 'บันทึกสถานะไม่สำเร็จ');
         fetchExamSettings();
       }
     } catch (err) {
-      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
       fetchExamSettings();
     }
   };

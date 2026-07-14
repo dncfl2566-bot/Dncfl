@@ -1285,6 +1285,19 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
               <span>รายชื่อนักเรียน ({students.length})</span>
             </button>
             <button
+  onClick={() => {
+    setActiveTab('exam-settings');
+    setSearchQuery('');
+  }}
+  className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold transition-colors ${
+    activeTab === 'exam-settings'
+      ? 'bg-[#002B49] text-white'
+      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+  }`}
+>
+  ⚙️ จัดการการสอบ
+</button>
+            <button
               onClick={() => { setActiveTab('questions'); setSearchQuery(''); }}
               className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
                 activeTab === 'questions' ? 'bg-[#002B49] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'

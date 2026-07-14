@@ -277,6 +277,7 @@ async function ensureSpreadsheetTabs(token: string, spreadsheetId: string) {
   } catch (err) { console.error(err); }
 }
 
+// ค้นหาฟังก์ชัน pullAllFromGoogleSheets ในไฟล์ server (4).ts แล้วปรับปรุงให้เป็นแบบนี้:
 async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Promise<Partial<SystemState>> {
   const result: Partial<SystemState> = {};
   const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=Questions!A:J&ranges=Students!A:D&ranges=Submissions!A:W`, {
@@ -287,26 +288,36 @@ async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Pr
   const data: any = await getRes.json();
   const valueRanges = data.valueRanges || [];
 
-  // 🛠️ แก้ไขปัญหา: ตรวจเช็กว่าดึงชีตสำเร็จ ให้เริ่มต้นเป็นแอร์เรย์ว่างเพื่อสามารถลบทั้งหมดได้
+  // ดึงข้อมูลข้อสอบจากชีต Questions
   const questionsVal = valueRanges[0]?.values || [];
   const parsedQuestions: Question[] = [];
+  
+  // ตรวจสอบว่าถ้าแถวมากกว่า 1 (มีข้อสอบ) ให้แปลงค่ามาใส่
   if (questionsVal.length > 1) {
     for (let i = 1; i < questionsVal.length; i++) {
       const row = questionsVal[i];
-      if (!row[0]) continue;
+      if (!row[0]) continue; // ถ้าไม่มี ID ข้ามไป
       let choices, choiceImages;
       try { if (row[7]) choices = JSON.parse(row[7]); } catch (_) {}
       try { if (row[8]) choiceImages = JSON.parse(row[8]); } catch (_) {}
       parsedQuestions.push({
-        id: row[0], gradeLevel: row[1] as any, set: row[2] as any, type: row[3] as any,
-        questionNumber: parseInt(row[4], 10) || i, text: row[5] || "", image: row[6] || undefined,
-        choices, choiceImages, correctAnswer: row[9] || ""
+        id: row[0],
+        gradeLevel: row[1] as any,
+        set: row[2] as any,
+        type: row[3] as any,
+        questionNumber: parseInt(row[4], 10) || i,
+        text: row[5] || "",
+        image: row[6] || undefined,
+        choices,
+        choiceImages,
+        correctAnswer: row[9] || ""
       });
     }
   }
-  result.questions = parsedQuestions; // ส่งกลับเป็น [] เสมอ เพื่อเคลียร์ค่าถ้าบนชีตถูกลบจนเกลี้ยง
+  // ส่งค่าที่ประมวลผลได้กลับไป (หากลบเกลี้ยง parsedQuestions จะเป็น [] ซึ่งหมายความว่าระบบจะเคลียร์ข้อสอบออกทั้งหมดตามชีต)
+  result.questions = parsedQuestions;
 
-  // Parse Students from sheet
+  // ดึงข้อมูลรายชื่อนักเรียนจากชีต Students
   const studentsVal = valueRanges[1]?.values || [];
   const parsedStudents: Student[] = [];
   if (studentsVal.length > 1) {
@@ -315,8 +326,9 @@ async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Pr
       if (!row[0] || !row[1]) continue;
       parsedStudents.push({ id: row[0], name: row[1], class: row[2] || "3/2", number: parseInt(row[3], 10) || i });
     }
+    result.students = parsedStudents;
   }
-  result.students = parsedStudents;
+  
   return result;
 }
 
@@ -592,32 +604,34 @@ async function startServer() {
     } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
   });
 
-  // 🔥 2-Way Sync: ปรับแก้ตรงนี้ให้สามารถอัปเดตแบบเคลียร์ข้อมูลได้เมื่อฝั่งชีตลบจนเกลี้ยง
-  app.post("/api/admin/google-sheets/pull", async (req, res) => {
-    const state = readDb();
-    if (!state.googleAccessToken || !state.spreadsheetId) return res.status(400).json({ success: false, message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheets" });
-    try {
-      const pulledData = await pullAllFromGoogleSheets(state.googleAccessToken, state.spreadsheetId);
-      
-      // อัปเดตข้อมูลข้อสอบและรายชื่อนักเรียนตามค่าที่ดึงมาจากชีตเสมอ แม้ว่าจะเป็น array ว่างเปล่า [] ก็ตาม
-      if (pulledData.questions !== undefined) {
-        state.questions = pulledData.questions;
-      }
-      if (pulledData.students !== undefined) {
-        state.students = pulledData.students;
-      }
-      
-      writeDb(state);
-      res.json({ 
-        success: true, 
-        message: "ซิงค์ดึงข้อมูลจาก Google Sheets ลงระบบสำเร็จแล้ว!", 
-        questionsCount: state.questions.length, 
-        studentsCount: state.students.length 
-      });
-    } catch (err: any) { 
-      res.status(500).json({ success: false, message: err.message }); 
+  // ค้นหา API /api/admin/google-sheets/pull ในไฟล์ server (4).ts แล้วเปลี่ยนเป็นแบบนี้:
+app.post("/api/admin/google-sheets/pull", async (req, res) => {
+  const state = readDb();
+  if (!state.googleAccessToken || !state.spreadsheetId) {
+    return res.status(400).json({ success: false, message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheets" });
+  }
+  try {
+    const pulledData = await pullAllFromGoogleSheets(state.googleAccessToken, state.spreadsheetId);
+    
+    // บังคับอัปเดตข้อสอบตาม Google Sheets เสมอ แม้ข้อมูลที่ดึงมาจะเป็นอาเรย์ว่างเปล่าก็ตาม (กรณีที่คุณครูลบจนเกลี้ยงชีต)
+    if (pulledData.questions !== undefined) {
+      state.questions = pulledData.questions;
     }
-  });
+    if (pulledData.students !== undefined) {
+      state.students = pulledData.students;
+    }
+    
+    writeDb(state);
+    res.json({ 
+      success: true, 
+      message: "ซิงค์ดึงข้อมูลจาก Google Sheets ลงระบบเรียบร้อยแล้ว!", 
+      questionsCount: state.questions.length, 
+      studentsCount: state.students.length 
+    });
+  } catch (err: any) { 
+    res.status(500).json({ success: false, message: err.message }); 
+  }
+});
 
   // 🔥 2-Way Sync: สั่ง Push ข้อมูลปัจจุบันขึ้นทับบนชีตด้วยตนเอง
   app.post("/api/admin/google-sheets/push-manual", async (req, res) => {

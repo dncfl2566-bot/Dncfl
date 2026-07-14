@@ -9,7 +9,7 @@ import { Student, Question, Submission, SystemState } from "./src/types";
 import http from "http";
 import https from "https";
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const DB_FILE = path.join(process.cwd(), "db.json");
 const TARGET_DRIVE_FOLDER_ID = "1EbKMnX8twSAStZxjJXidlv_1D5G5u6GR";
 

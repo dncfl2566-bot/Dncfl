@@ -740,7 +740,28 @@ async function startServer() {
     const state = readDb();
     res.json({ success: true, submissions: state.submissions });
   });
+// --- 1. ตัวแปรเก็บสถานะเปิด-ปิดระบบสอบชั่วคราวบน Server ---
+let examSettings = {
+  '3': true,
+  '5': true,
+  '6': true,
+  '6/8': true
+};
 
+// --- 2. API สำหรับให้แอดมินดึงค่าสถานะไปแสดงผลบนปุ่มสวิตช์ ---
+app.get('/api/admin/settings', (req, res) => {
+  res.json({ success: true, settings: examSettings });
+});
+
+// --- 3. API สำหรับเซฟสถานะใหม่เมื่อแอดมินกดสลับปุ่มปิด-เปิด ---
+app.post('/api/admin/settings', (req, res) => {
+  const { settings } = req.body;
+  if (settings) {
+    examSettings = { ...examSettings, ...settings };
+    return res.json({ success: true, settings: examSettings });
+  }
+  res.status(400).json({ success: false, message: 'ข้อมูลการตั้งค่าไม่ถูกต้อง' });
+});
   // ADMIN API: Delete submission
   app.post("/api/admin/submissions/delete", (req, res) => {
     const { submissionId } = req.body;

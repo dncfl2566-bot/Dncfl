@@ -649,6 +649,15 @@ async function startServer() {
     else if (cStr === "6/8") gradeLevel = '6/8';
     else if (cStr.startsWith("6/")) gradeLevel = '6';
 
+    // --- เช็กว่าระดับชั้นนี้ถูกเปิดหรือปิดระบบข้อสอบอยู่ ---
+    const isExamOpen = examSettings[gradeLevel];
+    if (isExamOpen === false) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `ขณะนี้ระบบสอบของระดับชั้น ม.${gradeLevel} ได้ปิดบริการชั่วคราวแล้ว กรุณาติดต่อคุณครูผู้คุมสอบ` 
+      });
+    }
+    
     const state = readDb();
     const filteredQuestions = state.questions.filter(
       q => q.gradeLevel === gradeLevel && q.set === set

@@ -1,9 +1,9 @@
 {
-  "projectId": "math-d44db",
-  "appId": "1:658144391226:web:9a57d7ca336efb2f0f0503",
-  "apiKey": "AIzaSyCMVgvejbgaeAnFIOzkzGYOan_jh68y2DE",
-  "authDomain": "math-d44db.firebaseapp.com",
-  "storageBucket": "math-d44db.firebasestorage.app",
-  "messagingSenderId": "658144391226",
-  "measurementId": "G-0T6GS56WF4"
+  apiKey: "AIzaSyCMVGvejbgaEanFIOzkzGYOan_jh68y2DE",
+  authDomain: "math-d44db.firebaseapp.com",
+  projectId: "math-d44db",
+  storageBucket: "math-d44db.firebasestorage.app",
+  messagingSenderId: "658144391226",
+  appId: "1:658144391226:web:9a57d7ca336efb8f2f0503",
+  measurementId: "G-0T6GS56WF4"
 }

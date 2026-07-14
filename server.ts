@@ -1139,6 +1139,33 @@ app.post('/api/admin/settings', (req, res) => {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+  // ==========================================================
+// ส่วนที่เพิ่ม: ระบบจัดการเปิด-ปิดข้อสอบแยกตามระดับชั้น
+// ==========================================================
+
+// 1. ตัวแปรเก็บสถานะการเปิดสอบ (เปิดเป็นค่าเริ่มต้นทั้งหมด)
+let currentExamSettings = {
+  '3': true,
+  '5': true,
+  '6': true,
+  '6/8': true
+};
+
+// 2. ท่อส่งข้อมูล (GET) เพื่อส่งสถานะไปแสดงผลบนปุ่มสวิตช์ของครู
+app.get('/api/admin/settings', (req, res) => {
+  res.json({ success: true, settings: currentExamSettings });
+});
+
+// 3. ท่อรับข้อมูล (POST) เพื่ออัปเดตสถานะเมื่อคุณครูกดสลับสวิตช์
+app.post('/api/admin/settings', (req, res) => {
+  const { settings } = req.body;
+  if (settings) {
+    currentExamSettings = { ...currentExamSettings, ...settings };
+    return res.json({ success: true, settings: currentExamSettings });
+  }
+  res.status(400).json({ success: false, message: 'ข้อมูลการตั้งค่าไม่ถูกต้อง' });
+});
+// ==========================================================
 }
 
 startServer();

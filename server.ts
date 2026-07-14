@@ -287,10 +287,10 @@ async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Pr
   const data: any = await getRes.json();
   const valueRanges = data.valueRanges || [];
 
-  // Parse Questions from sheet
+  // 🛠️ แก้ไขปัญหา: ตรวจเช็กว่าดึงชีตสำเร็จ ให้เริ่มต้นเป็นแอร์เรย์ว่างเพื่อสามารถลบทั้งหมดได้
   const questionsVal = valueRanges[0]?.values || [];
+  const parsedQuestions: Question[] = [];
   if (questionsVal.length > 1) {
-    const parsedQuestions: Question[] = [];
     for (let i = 1; i < questionsVal.length; i++) {
       const row = questionsVal[i];
       if (!row[0]) continue;
@@ -303,20 +303,20 @@ async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Pr
         choices, choiceImages, correctAnswer: row[9] || ""
       });
     }
-    result.questions = parsedQuestions;
   }
+  result.questions = parsedQuestions; // ส่งกลับเป็น [] เสมอ เพื่อเคลียร์ค่าถ้าบนชีตถูกลบจนเกลี้ยง
 
   // Parse Students from sheet
   const studentsVal = valueRanges[1]?.values || [];
+  const parsedStudents: Student[] = [];
   if (studentsVal.length > 1) {
-    const parsedStudents: Student[] = [];
     for (let i = 1; i < studentsVal.length; i++) {
       const row = studentsVal[i];
       if (!row[0] || !row[1]) continue;
       parsedStudents.push({ id: row[0], name: row[1], class: row[2] || "3/2", number: parseInt(row[3], 10) || i });
     }
-    result.students = parsedStudents;
   }
+  result.students = parsedStudents;
   return result;
 }
 
@@ -377,13 +377,12 @@ async function startServer() {
     }
   });
 
-  // 🛡️ โค้ดส่วนสุ่มข้อสอบชุด A / B สำหรับเลขที่คี่/คู่ ยังได้รับการรักษาไว้อย่างถูกต้องแม่นยำ
   app.get("/api/questions", (req, res) => {
     const { class: className, number } = req.query;
     if (!className || !number) return res.status(400).json({ success: false, message: "ข้อมูลห้องเรียนหรือเลขที่ไม่ครบถ้วน" });
 
     const studentNumber = parseInt(number as string, 10);
-    const set = studentNumber % 2 === 1 ? 'A' : 'B'; // เลขที่คี่ได้ชุด A, คู่ได้ชุด B
+    const set = studentNumber % 2 === 1 ? 'A' : 'B';
 
     let gradeLevel: '3' | '5' | '6' | '6/8' = '3';
     const cStr = (className as string).trim();
@@ -593,22 +592,31 @@ async function startServer() {
     } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
   });
 
-  // 🔥 2-Way Sync: ดึงข้อมูลจาก Sheets ลงฐานข้อมูลเซิร์ฟเวอร์
+  // 🔥 2-Way Sync: ปรับแก้ตรงนี้ให้สามารถอัปเดตแบบเคลียร์ข้อมูลได้เมื่อฝั่งชีตลบจนเกลี้ยง
   app.post("/api/admin/google-sheets/pull", async (req, res) => {
     const state = readDb();
     if (!state.googleAccessToken || !state.spreadsheetId) return res.status(400).json({ success: false, message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheets" });
     try {
       const pulledData = await pullAllFromGoogleSheets(state.googleAccessToken, state.spreadsheetId);
-      let updated = false;
-      if (pulledData.questions && pulledData.questions.length > 0) { state.questions = pulledData.questions; updated = true; }
-      if (pulledData.students && pulledData.students.length > 0) { state.students = pulledData.students; updated = true; }
-      if (updated) {
-        writeDb(state);
-        res.json({ success: true, message: "ดึงข้อมูลข้อสอบและนักเรียนเรียบร้อยแล้ว!", questionsCount: state.questions.length, studentsCount: state.students.length });
-      } else {
-        res.status(400).json({ success: false, message: "ไม่พบข้อมูลที่แก้ไขใหม่ในชีต" });
+      
+      // อัปเดตข้อมูลข้อสอบและรายชื่อนักเรียนตามค่าที่ดึงมาจากชีตเสมอ แม้ว่าจะเป็น array ว่างเปล่า [] ก็ตาม
+      if (pulledData.questions !== undefined) {
+        state.questions = pulledData.questions;
       }
-    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+      if (pulledData.students !== undefined) {
+        state.students = pulledData.students;
+      }
+      
+      writeDb(state);
+      res.json({ 
+        success: true, 
+        message: "ซิงค์ดึงข้อมูลจาก Google Sheets ลงระบบสำเร็จแล้ว!", 
+        questionsCount: state.questions.length, 
+        studentsCount: state.students.length 
+      });
+    } catch (err: any) { 
+      res.status(500).json({ success: false, message: err.message }); 
+    }
   });
 
   // 🔥 2-Way Sync: สั่ง Push ข้อมูลปัจจุบันขึ้นทับบนชีตด้วยตนเอง

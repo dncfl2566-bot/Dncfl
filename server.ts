@@ -248,7 +248,7 @@ async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state
     });
 
     // Make batchUpdate call to update all three sheets
-    const updateRes = await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
+    const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
@@ -307,7 +307,7 @@ async function syncToGoogleSheetsWithQueue(token: string, spreadsheetId: string,
 
 async function createMathExamSpreadsheet(token: string, state: SystemState): Promise<string> {
   try {
-    const createRes = await fetch("https://sheets.googleapis.com/v1/spreadsheets", {
+    const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
@@ -368,7 +368,7 @@ async function findMathExamSpreadsheet(token: string): Promise<string | null> {
 
 async function ensureSpreadsheetTabs(token: string, spreadsheetId: string) {
   try {
-    const getRes = await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}`, {
+    const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
       headers: { "Authorization": `Bearer ${token}` }
     });
     if (!getRes.ok) return;
@@ -384,7 +384,7 @@ async function ensureSpreadsheetTabs(token: string, spreadsheetId: string) {
         addSheet: { properties: { title } }
       }));
       
-      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -402,7 +402,7 @@ async function pullAllFromGoogleSheets(token: string, spreadsheetId: string): Pr
   const result: Partial<SystemState> = {};
   try {
     // Read all ranges
-    const getRes = await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values:batchGet?ranges=Questions!A:J&ranges=Students!A:D&ranges=Submissions!A:W`, {
+    const getRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?ranges=Questions!A:J&ranges=Students!A:D&ranges=Submissions!A:W`, {
       headers: { "Authorization": `Bearer ${token}` }
     });
 

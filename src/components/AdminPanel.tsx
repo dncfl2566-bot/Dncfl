@@ -157,8 +157,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     questionNumber: 1,
     text: '',
     image: '',
-    choices: ['', '', '', ''],
-    choiceImages: ['', '', '', ''],
+    choices: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
+    choiceImages: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
     correctAnswer: ''
   });
 
@@ -1196,8 +1196,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       questionNumber: q.questionNumber,
       text: q.text,
       image: q.image || '',
-      choices: q.choices ? [...q.choices] : ['', '', '', ''],
-      choiceImages: q.choiceImages ? [...q.choiceImages] : (q.choices ? q.choices.map(() => '') : ['', '', '', '']),
+      choices: q.choices ? [...q.choices] : ['', '', '', '', ''],
+      choiceImages: q.choiceImages ? [...q.choiceImages] : (q.choices ? q.choices.map(() => '') : ['', '', '', '', '']),
       correctAnswer: q.correctAnswer
     });
     setIsQuestionModalOpen(true);
@@ -1212,8 +1212,8 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       questionNumber: questions.length + 1,
       text: '',
       image: '',
-      choices: ['', '', '', ''],
-      choiceImages: ['', '', '', ''],
+      choices: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
+      choiceImages: ['', '', '', '', ''], // เพิ่มช่องที่ 5 รองรับตัวเลือก จ.
       correctAnswer: ''
     });
     setIsQuestionModalOpen(true);

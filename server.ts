@@ -253,7 +253,24 @@ async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state
         sub.originalShortAnswers ? JSON.stringify(sub.originalShortAnswers) : ""
       ]);
     });
-
+// ล้างข้อมูลเดิมก่อนเขียนข้อมูลใหม่
+await fetch(
+  `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
+  {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      ranges: [
+        "Questions!A2:Z",
+        "Students!A2:Z",
+        "Submissions!A2:Z"
+      ]
+    })
+  }
+);
     // Make batchUpdate call to update all three sheets
     const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
       method: "POST",

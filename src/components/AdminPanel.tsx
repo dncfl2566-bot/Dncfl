@@ -1315,6 +1315,18 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
               <BarChart2 size={16} />
               <span>ภาพรวมรายห้อง ({Array.from(new Set(students.map(s => s.class))).length} ห้อง)</span>
             </button>
+            {/* ปุ่มควบคุมระบบเปิด-ปิดข้อสอบ */}
+<button 
+  onClick={() => { setActiveTab('exam-settings'); setSearchQuery(''); }} 
+  className={`flex-1 md:flex-initial px-4 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+    activeTab === 'exam-settings' 
+      ? 'bg-[#002B49] text-white' 
+      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+  }`}
+>
+  <Award size={14} />
+  <span>ตั้งค่าเปิด-ปิดข้อสอบ</span>
+</button>
           </div>
 
           <div className="relative w-full md:w-72">

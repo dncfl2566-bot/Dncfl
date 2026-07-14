@@ -87,7 +87,7 @@ function fetchUrlText(url: string): Promise<string> {
 }
 
 let cachedDbState: SystemState | null = null;
-let examSettings: Record<string, boolean> = { '3': true, '5': true, '6': true, '6/8': true };
+let examSettings: Record<string, boolean> = { '3': false, '5': false, '6': false, '6/8': false };
 
 function readDb(): SystemState {
   if (cachedDbState) return cachedDbState;

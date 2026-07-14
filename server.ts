@@ -117,13 +117,14 @@ function fetchUrlText(url: string): Promise<string> {
 
 // Read database
 let cachedDbState: SystemState | null = null;
-// --- เพิ่ม: ตัวแปรเก็บสถานะเปิด-ปิดระบบสอบชั่วคราวบน Server (ประกาศไว้ด้านบนสุด) ---
+// --- ตัวแปรเก็บสถานะเปิด-ปิดระบบสอบชั่วคราวบน Server ---
 let examSettings = {
   '3': true,
   '5': true,
   '6': true,
   '6/8': true
 };
+
 function readDb(): SystemState {
   if (cachedDbState) {
     return cachedDbState;
@@ -637,11 +638,7 @@ async function startServer() {
     const studentNumber = parseInt(number as string, 10);
     const set = studentNumber % 2 === 1 ? 'A' : 'B'; // Odd -> A, Even -> B
 
-    // Class mapping to Grade levels:
-    // 3/2 -> Grade 3
-    // 5/3, 5/5 -> Grade 5
-    // 6/3, 6/5 -> Grade 6
-    // 6/8 -> Grade 6/8 (Separate subject code)
+    // Class mapping to Grade levels
     let gradeLevel: '3' | '5' | '6' | '6/8' = '3';
     const cStr = (className as string).trim();
     if (cStr.startsWith("3/")) gradeLevel = '3';
@@ -649,7 +646,7 @@ async function startServer() {
     else if (cStr === "6/8") gradeLevel = '6/8';
     else if (cStr.startsWith("6/")) gradeLevel = '6';
 
-    // --- เช็กว่าระดับชั้นนี้ถูกเปิดหรือปิดระบบข้อสอบอยู่ ---
+    // เช็กสถานะการเปิด/ปิดสอบผ่านทาง examSettings
     const isExamOpen = examSettings[gradeLevel];
     if (isExamOpen === false) {
       return res.status(403).json({ 
@@ -703,7 +700,6 @@ async function startServer() {
     mcQuestions.forEach(q => {
       const studentAns = multipleChoiceAnswers[q.id];
       if (studentAns !== undefined && studentAns !== null) {
-        // String trimming comparison for accuracy
         if (studentAns.toString().trim() === q.correctAnswer.toString().trim()) {
           mcScore++;
         }
@@ -750,18 +746,18 @@ async function startServer() {
     res.json({ success: true, submission });
   });
 
- // ADMIN API: Get all submissions
+  // ADMIN API: Get all submissions
   app.get("/api/admin/submissions", (req, res) => {
     const state = readDb();
     res.json({ success: true, submissions: state.submissions });
   });
 
-  // --- เพิ่ม: API สำหรับให้แอดมินดึงค่าสถานะไปแสดงผลบนปุ่มสวิตช์ ---
+  // ADMIN API: API สำหรับให้แอดมินดึงค่าสถานะไปแสดงผลบนปุ่มสวิตช์
   app.get('/api/admin/settings', (req, res) => {
     res.json({ success: true, settings: examSettings });
   });
 
-  // --- เพิ่ม: API สำหรับเซฟสถานะใหม่เมื่อแอดมินกดสลับปุ่มปิด-เปิด ---
+  // ADMIN API: API สำหรับบันทึกสถานะเปิด-ปิดระบบสอบของแต่ละชั้น
   app.post('/api/admin/settings', (req, res) => {
     const { settings } = req.body;
     if (settings) {
@@ -822,7 +818,7 @@ async function startServer() {
     }
   });
 
-  // ADMIN API: Grade short answers and written answer (And edit student answers if requested)
+  // ADMIN API: Grade short answers and written answer
   app.post("/api/admin/grade", (req, res) => {
     const { 
       submissionId, 
@@ -880,7 +876,6 @@ async function startServer() {
       sub.shortAnswers = editedShortAnswers;
     }
     
-    // The admin has full grading discretion even if the student's warning count is high
     sub.multipleChoiceScore = mcScore;
     sub.shortAnswerScores = shortAnswerScores;
     sub.writtenScore = parseFloat(writtenScore) || 0;
@@ -917,7 +912,6 @@ async function startServer() {
     }
 
     const state = readDb();
-    // Overwrite student list
     state.students = students;
     writeDb(state);
 
@@ -932,14 +926,11 @@ async function startServer() {
     }
 
     try {
-      // Convert standard sharing link to a direct CSV export link
       let csvUrl = sheetUrl.trim();
       if (csvUrl.includes("docs.google.com/spreadsheets")) {
-        // Extract spreadsheet ID and gid
         const matches = csvUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
         if (matches && matches[1]) {
           const spreadsheetId = matches[1];
-          // Extract GID
           let gid = "0";
           const gidMatch = csvUrl.match(/gid=([0-9]+)/);
           if (gidMatch && gidMatch[1]) {
@@ -973,19 +964,18 @@ async function startServer() {
     const state = readDb();
     res.json({ success: true, questions: state.questions });
   });
-// --- ADMIN API: เพิ่ม/แก้ไขข้อสอบ (Add or Edit Questions) ---
+
+  // ADMIN API: เพิ่ม/แก้ไขข้อสอบ (Add or Edit Questions)
   app.post("/api/admin/questions", (req, res) => {
     const { question, questions: bulkQuestions } = req.body;
     const state = readDb();
 
-    // กรณีที่ 1: การอัปเดตแบบกลุ่ม (Bulk Import/Update)
     if (bulkQuestions && Array.isArray(bulkQuestions)) {
       state.questions = bulkQuestions;
       writeDb(state);
       return res.json({ success: true, message: "บันทึกข้อมูลข้อสอบทั้งหมดเรียบร้อยแล้ว", questions: state.questions });
     }
 
-    // กรณีที่ 2: เพิ่มหรือแก้ไขข้อสอบรายข้อ (Single Question Add/Edit)
     if (!question || !question.id) {
       return res.status(400).json({ success: false, message: "ข้อมูลข้อสอบไม่ครบถ้วนหรือไม่ถูกต้อง" });
     }
@@ -993,14 +983,12 @@ async function startServer() {
     const existingIdx = state.questions.findIndex(q => q.id === question.id);
 
     if (existingIdx !== -1) {
-      // แก้ไขข้อสอบเดิมที่มีอยู่
       state.questions[existingIdx] = {
         ...state.questions[existingIdx],
         ...question,
         questionNumber: parseInt(question.questionNumber, 10) || state.questions[existingIdx].questionNumber
       };
     } else {
-      // เพิ่มข้อสอบข้อใหม่
       state.questions.push({
         ...question,
         questionNumber: parseInt(question.questionNumber, 10) || (state.questions.length + 1)
@@ -1131,7 +1119,7 @@ async function startServer() {
     }
   });
 
-  // --- VITE DEVELOPMENT OR PRODUCTION SERVING ---
+  // --- VITE DEVELOPMENT OR PRODUCTION SERVING & STATIC FILES ---
   const uploadsDir = path.join(process.cwd(), "public", "uploads");
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
@@ -1165,65 +1153,13 @@ async function startServer() {
     });
   }
 
-  // เริ่มต้นทำงาน Server
-  app.listen(PORT, () => {
+  // เปิดให้รัน Server (รับส่งข้อมูลแบบ 0.0.0.0 เพื่อให้อุปกรณ์อื่นในเครือข่ายเข้าถึงได้)
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Server is running on http://localhost:${PORT}`);
   });
 }
 
-// เรียกให้ startServer ทำงาน
+// สตาร์ตการทำงานของ Server
 startServer().catch(err => {
   console.error("Failed to start server:", err);
 });
-
-  // Serve uploaded images statically
-  app.use("/uploads", express.static(path.join(process.cwd(), "public/uploads")));
-
-  // Serve static assets in production
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-  // ==========================================================
-// ส่วนที่เพิ่ม: ระบบจัดการเปิด-ปิดข้อสอบแยกตามระดับชั้น
-// ==========================================================
-
-// 1. ตัวแปรเก็บสถานะการเปิดสอบ (เปิดเป็นค่าเริ่มต้นทั้งหมด)
-let currentExamSettings = {
-  '3': true,
-  '5': true,
-  '6': true,
-  '6/8': true
-};
-
-// 2. ท่อส่งข้อมูล (GET) เพื่อส่งสถานะไปแสดงผลบนปุ่มสวิตช์ของครู
-app.get('/api/admin/settings', (req, res) => {
-  res.json({ success: true, settings: currentExamSettings });
-});
-
-// 3. ท่อรับข้อมูล (POST) เพื่ออัปเดตสถานะเมื่อคุณครูกดสลับสวิตช์
-app.post('/api/admin/settings', (req, res) => {
-  const { settings } = req.body;
-  if (settings) {
-    currentExamSettings = { ...currentExamSettings, ...settings };
-    return res.json({ success: true, settings: currentExamSettings });
-  }
-  res.status(400).json({ success: false, message: 'ข้อมูลการตั้งค่าไม่ถูกต้อง' });
-});
-// ==========================================================
-}
-
-startServer();

@@ -89,48 +89,7 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       fetchExamSettings();
     }
   };
-  // --- ตัวแปรและฟังก์ชันควบคุมเปิด-ปิดระบบสอบ ---
-  const [examSettings, setExamSettings] = useState<Record<string, boolean>>({
-    '3': true,
-    '5': true,
-    '6': true,
-    '6/8': true
-  });
-
-  const fetchExamSettings = async () => {
-    try {
-      const res = await fetch('/api/admin/settings');
-      const data = await res.json();
-      if (data.success && data.settings) {
-        setExamSettings(data.settings);
-      }
-    } catch (err) {
-      console.error('Failed to fetch exam settings:', err);
-    }
-  };
-
-  const handleToggleExam = async (gradeLevel: string, isOpen: boolean) => {
-    const updatedSettings = { ...examSettings, [gradeLevel]: isOpen };
-    setExamSettings(updatedSettings);
-    try {
-      const res = await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings: updatedSettings })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(`บันทึกการตั้งค่าระบบสอบ ม.${gradeLevel} สำเร็จ`);
-      } else {
-        alert(data.message || 'บันทึกสถานะไม่สำเร็จ');
-        fetchExamSettings();
-      }
-    } catch (err) {
-      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
-      fetchExamSettings();
-    }
-  };
-
+ 
   // Bulk Questions select state & ref
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [showAbsentModal, setShowAbsentModal] = useState(false);

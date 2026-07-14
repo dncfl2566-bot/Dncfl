@@ -472,7 +472,34 @@ async function startServer() {
       res.json({ success: true, url: `/uploads/${uniqueFilename}` });
     } catch (err) { res.status(500).json({ success: false }); }
   });
+import { google } from 'googleapis';
+import fs from 'fs';
 
+app.post('/api/admin/upload', async (req, res) => {
+  try {
+    const state = readDb();
+    if (!state.googleAccessToken) {
+      return res.status(401).json({ success: false, message: 'กรุณาเชื่อมต่อ Google Account ก่อนอัปโหลด' });
+    }
+
+    const auth = new google.auth.OAuth2();
+    auth.setCredentials({ access_token: state.googleAccessToken });
+    const drive = google.drive({ version: 'v3', auth });
+
+    // โค้ดสำหรับบันทึกไฟล์และอัปโหลดไปยัง Drive (Multi-part upload)
+    const fileMetadata = {
+      name: `exam_${Date.now()}.jpg`,
+      parents: ['โฟลเดอร์ไอดีในกูเกิ้ลไดรฟ์ (ถ้ามี)'] 
+    };
+    
+    // หลังจากอัปโหลดสำเร็จ ให้นำเอา webContentLink หรือ id มาเจนเนอเรตเป็น URL ภาพเพื่อบันทึกแทนพิกเซลลิงก์เดิม
+    // ตัวอย่างรูปแบบลิงก์ตรง: https://lh3.googleusercontent.com/u/0/d/{FILE_ID}
+    
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Upload ล้มเหลว' });
+  }
+});
+  
   app.post("/api/admin/grade", (req, res) => {
     const { submissionId, shortAnswerScores, writtenScore, feedback, editedMultipleChoiceAnswers, editedShortAnswers, cheated } = req.body;
     const state = readDb();

@@ -579,7 +579,27 @@ async function startServer() {
     const state = readDb(); state.questions = []; writeDb(state);
     res.json({ success: true, questions: [] });
   });
-
+const proceedBulkDeleteQuestions = async () => {
+  setLoading(true);
+  try {
+    const res = await fetch('/api/admin/questions/clear-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (data.success) {
+      setQuestions([]); // ล้างข้อสอบในหน้าจอออกทั้งหมด
+      setSelectedQuestionIds([]); // ล้างรายการที่เลือกค้างไว้
+      showMsg('ลบข้อสอบทั้งหมดออกจากระบบสำเร็จเรียบร้อยแล้ว', 'success');
+    } else {
+      showMsg(data.message || 'ลบไม่สำเร็จ', 'error');
+    }
+  } catch (err) {
+    showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+  } finally {
+    setLoading(false);
+  }
+};
   app.get("/api/admin/google-sheets/status", (req, res) => {
     const state = readDb();
     res.json({ success: true, hasToken: !!state.googleAccessToken, spreadsheetId: state.spreadsheetId || null });

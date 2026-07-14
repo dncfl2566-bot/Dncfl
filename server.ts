@@ -976,141 +976,214 @@ async function startServer() {
 
   // --- ADMIN API: เพิ่ม/แก้ไขข้อสอบ (Add or Edit Questions) ---
   app.post("/api/admin/questions", (req, res) => {
-    const { question, questions } = req.body;
+    const { question, questions: bulkQuestions } = req.body;
     const state = readDb();
 
-    if (questions && Array.isArray(questions)) {
-      // กรณีบันทึกแบบเป็นกลุ่ม (Batch Save)
-      state.questions = questions;
+    // กรณีที่ 1: การอัปเดตแบบกลุ่ม (Bulk Import/Update)
+    if (bulkQuestions && Array.isArray(bulkQuestions)) {
+      state.questions = bulkQuestions;
       writeDb(state);
-      return res.json({ success: true, questions: state.questions });
+      return res.json({ success: true, message: "บันทึกข้อมูลข้อสอบทั้งหมดเรียบร้อยแล้ว", questions: state.questions });
     }
 
-    if (!question) {
-      return res.status(400).json({ success: false, message: "ไม่พบข้อมูลข้อสอบ" });
+    // กรณีที่ 2: เพิ่มหรือแก้ไขข้อสอบรายข้อ (Single Question Add/Edit)
+    if (!question || !question.id) {
+      return res.status(400).json({ success: false, message: "ข้อมูลข้อสอบไม่ครบถ้วนหรือไม่ถูกต้อง" });
     }
 
-    const idx = state.questions.findIndex(q => q.id === question.id);
-    if (idx !== -1) {
-      // ถ้ามีอยู่แล้ว ให้แก้ไข (Update)
-      state.questions[idx] = question;
+    const existingIdx = state.questions.findIndex(q => q.id === question.id);
+
+    if (existingIdx !== -1) {
+      // แก้ไขข้อสอบเดิมที่มีอยู่
+      state.questions[existingIdx] = {
+        ...state.questions[existingIdx],
+        ...question,
+        questionNumber: parseInt(question.questionNumber, 10) || state.questions[existingIdx].questionNumber
+      };
     } else {
-      // ถ้ายังไม่มี ให้เพิ่มใหม่ (Add New)
-      state.questions.push(question);
-    }
-
-    writeDb(state);
-    res.json({ success: true, questions: state.questions });
-  });
-
-  // --- ADMIN API: ลบข้อสอบรายข้อ (Delete Single Question) ---
-  app.delete("/api/admin/questions/:id", (req, res) => {
-    const { id } = req.params;
-    const state = readDb();
-
-    const exists = state.questions.some(q => q.id === id);
-    if (!exists) {
-      return res.status(404).json({ success: false, message: "ไม่พบข้อมูลข้อสอบที่ต้องการลบ" });
-    }
-
-    // ลบข้อสอบที่มี ID นี้ออกจาก Array
-    state.questions = state.questions.filter(q => q.id !== id);
-    
-    // บันทึกลง db.json พร้อมซิงก์ขึ้น Google Sheets อัตโนมัติทันที
-    writeDb(state);
-
-    res.json({ success: true, message: "ลบข้อสอบเรียบร้อยแล้ว", questions: state.questions });
-  });
-
-  // --- ADMIN API: ดึงข้อสอบทั้งหมด (ดึงสด) จาก Google Sheets มาเขียนทับเซิร์ฟเวอร์ ---
-  app.post("/api/admin/questions/pull-sheet", async (req, res) => {
-    const state = readDb();
-    
-    // ดึง Token และ Spreadsheet ID ที่ระบบเซฟเก็บไว้ล่าสุด
-    const token = state.googleAccessToken;
-    const spreadsheetId = state.spreadsheetId;
-
-    if (!token || !spreadsheetId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheet หรือ Token หมดอายุ กรุณาเชื่อมต่อบัญชี Google ใหม่ที่หน้า Admin" 
+      // เพิ่มข้อสอบข้อใหม่
+      state.questions.push({
+        ...question,
+        questionNumber: parseInt(question.questionNumber, 10) || (state.questions.length + 1)
       });
     }
 
-    try {
-      console.log("กำลังดึงข้อสอบล่าสุดจาก Google Sheets มาอัปเดตระบบ...");
-      const pulledData = await pullAllFromGoogleSheets(token, spreadsheetId);
-
-      if (pulledData.questions && pulledData.questions.length > 0) {
-        // เขียนทับข้อสอบในระบบด้วยข้อสอบชุดปัจจุบันบน Google Sheets
-        state.questions = pulledData.questions;
-        
-        // บันทึกสถานะใหม่ลงเซิร์ฟเวอร์
-        writeDb(state);
-        return res.json({ 
-          success: true, 
-          message: `ดึงข้อสอบสำเร็จ! อัปเดตทั้งหมด ${pulledData.questions.length} ข้อเรียบร้อยแล้ว`, 
-          questions: state.questions 
-        });
-      } else {
-        return res.status(400).json({ 
-          success: false, 
-          message: "ไม่พบข้อมูลข้อสอบในแท็บ Questions ของ Google Sheet หรือข้อมูลในชีตว่างเปล่า" 
-        });
-      }
-    } catch (err) {
-      console.error("Error pulling questions from Sheet:", err);
-      res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets: " + err.message });
-    }
+    writeDb(state);
+    res.json({ success: true, message: "บันทึกข้อมูลข้อสอบเรียบร้อยแล้ว", questions: state.questions });
   });
 
-  // --- GOOGLE SHEETS CONNECTION & STATUS APIs ---
-  app.post("/api/admin/google-sheets/connect", async (req, res) => {
-    const { accessToken } = req.body;
-    if (!accessToken) return res.status(400).json({ success: false, message: "Missing Access Token" });
+  // ADMIN API: ลบข้อสอบรายข้อ (Delete Single Question)
+  app.delete("/api/admin/questions/:id", (req, res) => {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "กรุณาระบุ ID ของข้อสอบที่ต้องการลบ" });
+    }
 
     const state = readDb();
-    state.googleAccessToken = accessToken;
+    const originalLength = state.questions.length;
+    state.questions = state.questions.filter(q => q.id !== id);
 
-    try {
-      let spreadsheetId = state.spreadsheetId;
-      if (!spreadsheetId) {
-        // ค้นหาว่ามีไฟล์ชีตเดิมอยู่แล้วไหม
-        spreadsheetId = await findMathExamSpreadsheet(accessToken);
-      }
-
-      if (!spreadsheetId) {
-        // ถ้าไม่มี ให้สร้างใหม่
-        spreadsheetId = await createMathExamSpreadsheet(accessToken, state);
-      } else {
-        // ถ้ามี ให้ตรวจเช็กว่า Tab ครบไหม
-        await ensureSpreadsheetTabs(accessToken, spreadsheetId);
-        // ซิงก์ข้อมูลไปทับชีต
-        await pushAllToGoogleSheets(accessToken, spreadsheetId, state);
-      }
-
-      state.spreadsheetId = spreadsheetId;
-      writeDb(state);
-
-      const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
-      res.json({ success: true, url: sheetUrl });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ success: false, message: err.message });
+    if (state.questions.length === originalLength) {
+      return res.status(404).json({ success: false, message: "ไม่พบข้อสอบที่ต้องการลบ" });
     }
+
+    writeDb(state);
+    res.json({ success: true, message: "ลบข้อสอบเรียบร้อยแล้ว", questions: state.questions });
   });
 
+  // ADMIN API: ลบข้อสอบทั้งหมด (Bulk Delete Questions)
+  app.post("/api/admin/questions/delete-all", (req, res) => {
+    const state = readDb();
+    state.questions = [];
+    writeDb(state);
+    res.json({ success: true, message: "ลบข้อสอบทั้งหมดในระบบเรียบร้อยแล้ว", questions: [] });
+  });
+
+  // --- GOOGLE SHEETS SYNC ENDPOINTS ---
+
+  // API: สำหรับดึงสถานะการเชื่อมต่อ Google Sheets ปัจจุบัน
   app.get("/api/admin/google-sheets/status", (req, res) => {
     const state = readDb();
-    if (state.spreadsheetId) {
-      res.json({ success: true, url: `https://docs.google.com/spreadsheets/d/${state.spreadsheetId}/edit` });
-    } else {
-      res.json({ success: false });
+    res.json({
+      success: true,
+      hasToken: !!state.googleAccessToken,
+      spreadsheetId: state.spreadsheetId || null
+    });
+  });
+
+  // API: สำหรับผูกหรือบันทึก Google Access Token และ Spreadsheet ID
+  app.post("/api/admin/google-sheets/setup", async (req, res) => {
+    const { token, spreadsheetId } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, message: "กรุณาระบุ Access Token" });
+    }
+
+    const state = readDb();
+    state.googleAccessToken = token;
+
+    try {
+      let activeSpreadsheetId = spreadsheetId;
+
+      // หากไม่ได้ส่ง spreadsheetId มา ให้ค้นหาไฟล์เดิมใน Google Drive ก่อน
+      if (!activeSpreadsheetId) {
+        activeSpreadsheetId = await findMathExamSpreadsheet(token);
+      }
+
+      // หากค้นหาแล้วยังไม่มี ให้สร้าง Spreadsheet ใหม่ขึ้นมาเลย
+      if (!activeSpreadsheetId) {
+        activeSpreadsheetId = await createMathExamSpreadsheet(token, state);
+      } else {
+        // หากมี Spreadsheet อยู่แล้ว ตรวจสอบและสร้างแท็บหน้าชีตที่จำเป็น (Questions, Students, Submissions)
+        await ensureSpreadsheetTabs(token, activeSpreadsheetId);
+        state.spreadsheetId = activeSpreadsheetId;
+        // บังคับ Sync ข้อมูลปัจจุบันขึ้นไปทันที
+        await pushAllToGoogleSheets(token, activeSpreadsheetId, state);
+      }
+
+      state.spreadsheetId = activeSpreadsheetId;
+      writeDb(state);
+
+      res.json({
+        success: true,
+        message: "เชื่อมต่อ Google Sheets เรียบร้อยแล้ว!",
+        spreadsheetId: activeSpreadsheetId
+      });
+    } catch (err: any) {
+      console.error("Google Sheets setup error:", err);
+      res.status(500).json({ success: false, message: `การตั้งค่าล้มเหลว: ${err.message}` });
     }
   });
 
-  // --- ส่วนปิดของ Server (Vite integration และ Start Port) ---
-  // (วางโค้ดปิด server.js หรือ app.js ที่คุณครูมีอยู่แล้วต่อด้านล่างสุดได้เลยครับ เช่น app.listen(PORT)...)
+  // API: สั่งดึงข้อมูลจาก Google Sheets ลงมาทับฐานข้อมูลที่ Server (Manual Pull)
+  app.post("/api/admin/google-sheets/pull", async (req, res) => {
+    const state = readDb();
+    if (!state.googleAccessToken || !state.spreadsheetId) {
+      return res.status(400).json({ success: false, message: "ระบบยังไม่ได้เชื่อมต่อกับ Google Sheets" });
+    }
+
+    try {
+      const pulledData = await pullAllFromGoogleSheets(state.googleAccessToken, state.spreadsheetId);
+      
+      let updated = false;
+      if (pulledData.questions) {
+        state.questions = pulledData.questions;
+        updated = true;
+      }
+      if (pulledData.students) {
+        state.students = pulledData.students;
+        updated = true;
+      }
+      if (pulledData.submissions) {
+        state.submissions = pulledData.submissions;
+        updated = true;
+      }
+
+      if (updated) {
+        writeDb(state);
+        res.json({
+          success: true,
+          message: "ดึงข้อมูลจาก Google Sheets สำเร็จและอัปเดตระบบเรียบร้อยแล้ว!",
+          questionsCount: state.questions.length,
+          studentsCount: state.students.length,
+          submissionsCount: state.submissions.length
+        });
+      } else {
+        res.status(400).json({ success: false, message: "ไม่พบข้อมูลที่ถูกต้องใน Google Sheets สำหรับนำเข้า" });
+      }
+    } catch (err: any) {
+      console.error("Google Sheets pull error:", err);
+      res.status(500).json({ success: false, message: `ไม่สามารถดึงข้อมูลได้: ${err.message}` });
+    }
+  });
+
+  // --- VITE DEVELOPMENT OR PRODUCTION SERVING ---
+  // เช็กว่ามีโฟลเดอร์สำหรับเก็บภาพอัปโหลดหรือยัง
+  const uploadsDir = path.join(process.cwd(), "public", "uploads");
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  // ให้ Express บริการไฟล์รูปภาพในโฟลเดอร์ public/uploads โดยตรง
+  app.use("/uploads", express.static(uploadsDir));
+
+  const isProd = process.env.NODE_ENV === "production";
+  if (!isProd) {
+    // โหมด Development: ใช้ Vite Middleware ช่วยรัน Frontend ร่วมด้วย
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "custom"
+    });
+    app.use(vite.middlewares);
+
+    app.use("*", async (req, res, next) => {
+      const url = req.originalUrl;
+      try {
+        let template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
+  } else {
+    // โหมด Production: เสิร์ฟไฟล์ที่ Build เรียบร้อยแล้วจากโฟลเดอร์ dist
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.use("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  // เริ่มต้นทำงาน Server
+  app.listen(PORT, () => {
+    console.log(`🚀 Server is running on http://localhost:${PORT}`);
+  });
+}
+
+// เริ่มต้นเรียกทำงานเซิร์ฟเวอร์
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+});
   });
 
   // Serve uploaded images statically

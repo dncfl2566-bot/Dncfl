@@ -48,6 +48,52 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: 'info' });
   const [searchQuery, setSearchQuery] = useState('');
+  // --- เพิ่มสถานะควบคุมเปิด-ปิดระบบสอบ ---
+  const [examSettings, setExamSettings] = useState<Record<string, boolean>>({
+    '3': true,
+    '5': true,
+    '6': true,
+    '6/8': true
+  });
+
+  // ฟังก์ชันดึงค่าสถานะการเปิด-ปิด จากหลังบ้าน
+  const fetchExamSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings');
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setExamSettings(data.settings);
+      }
+    } catch (err) {
+      console.error('Failed to fetch exam settings:', err);
+    }
+  };
+
+  // ฟังก์ชันสำหรับกดปุ่มสลับเปิด-ปิดระบบสอบ
+  const handleToggleExam = async (gradeLevel: string, isOpen: boolean) => {
+    const updatedSettings = { ...examSettings, [gradeLevel]: isOpen };
+
+    // แสดงผลบนจอทันที (เพื่อความเร็ว)
+    setExamSettings(updatedSettings);
+
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: updatedSettings })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showMsg(`บันทึกการตั้งค่าระบบสอบ ม.${gradeLevel} สำเร็จ`, 'success');
+      } else {
+        showMsg(data.message || 'บันทึกสถานะไม่สำเร็จ', 'error');
+        fetchExamSettings(); // หากเซฟไม่สำเร็จ ให้ดึงค่าเดิมกลับคืนมาแสดง
+      }
+    } catch (err) {
+      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+      fetchExamSettings(); // ดึงค่าเดิมกลับคืนมาแสดง
+    }
+  };
 
   // Bulk Questions select state & ref
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);

@@ -973,8 +973,7 @@ async function startServer() {
     const state = readDb();
     res.json({ success: true, questions: state.questions });
   });
-
-  // --- ADMIN API: เพิ่ม/แก้ไขข้อสอบ (Add or Edit Questions) ---
+// --- ADMIN API: เพิ่ม/แก้ไขข้อสอบ (Add or Edit Questions) ---
   app.post("/api/admin/questions", (req, res) => {
     const { question, questions: bulkQuestions } = req.body;
     const state = readDb();
@@ -1064,19 +1063,15 @@ async function startServer() {
     try {
       let activeSpreadsheetId = spreadsheetId;
 
-      // หากไม่ได้ส่ง spreadsheetId มา ให้ค้นหาไฟล์เดิมใน Google Drive ก่อน
       if (!activeSpreadsheetId) {
         activeSpreadsheetId = await findMathExamSpreadsheet(token);
       }
 
-      // หากค้นหาแล้วยังไม่มี ให้สร้าง Spreadsheet ใหม่ขึ้นมาเลย
       if (!activeSpreadsheetId) {
         activeSpreadsheetId = await createMathExamSpreadsheet(token, state);
       } else {
-        // หากมี Spreadsheet อยู่แล้ว ตรวจสอบและสร้างแท็บหน้าชีตที่จำเป็น (Questions, Students, Submissions)
         await ensureSpreadsheetTabs(token, activeSpreadsheetId);
         state.spreadsheetId = activeSpreadsheetId;
-        // บังคับ Sync ข้อมูลปัจจุบันขึ้นไปทันที
         await pushAllToGoogleSheets(token, activeSpreadsheetId, state);
       }
 
@@ -1137,17 +1132,14 @@ async function startServer() {
   });
 
   // --- VITE DEVELOPMENT OR PRODUCTION SERVING ---
-  // เช็กว่ามีโฟลเดอร์สำหรับเก็บภาพอัปโหลดหรือยัง
   const uploadsDir = path.join(process.cwd(), "public", "uploads");
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
-  // ให้ Express บริการไฟล์รูปภาพในโฟลเดอร์ public/uploads โดยตรง
   app.use("/uploads", express.static(uploadsDir));
 
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd) {
-    // โหมด Development: ใช้ Vite Middleware ช่วยรัน Frontend ร่วมด้วย
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "custom"
@@ -1166,7 +1158,6 @@ async function startServer() {
       }
     });
   } else {
-    // โหมด Production: เสิร์ฟไฟล์ที่ Build เรียบร้อยแล้วจากโฟลเดอร์ dist
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.use("*", (req, res) => {
@@ -1180,11 +1171,10 @@ async function startServer() {
   });
 }
 
-// เริ่มต้นเรียกทำงานเซิร์ฟเวอร์
+// เรียกให้ startServer ทำงาน
 startServer().catch(err => {
   console.error("Failed to start server:", err);
 });
-  });
 
   // Serve uploaded images statically
   app.use("/uploads", express.static(path.join(process.cwd(), "public/uploads")));

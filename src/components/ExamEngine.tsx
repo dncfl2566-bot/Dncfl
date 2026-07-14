@@ -132,9 +132,9 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
   // Window Resize Monitoring (Maximize Enforcement & Split Screen Detection)
   useEffect(() => {
     const checkWindowSize = () => {
-      // Lower the threshold to standard mobile/tablet boundaries (width < 640px or height < 450px)
+      // Lower the threshold to standard mobile/tablet boundaries (width < 450px or height < 320px)
       // to support small laptop viewports, zooms, and iframe previews beautifully.
-      const isSmall = window.innerWidth < 640 || window.innerHeight < 450;
+      const isSmall = window.innerWidth < 450 || window.innerHeight < 320;
       setIsScreenResizedSmall(isSmall);
 
       // We bypass split-screen detection ONLY if embedded in an iframe (e.g. AI Studio Preview window)

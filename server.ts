@@ -633,6 +633,16 @@ app.post("/api/admin/google-sheets/pull", async (req, res) => {
   }
 });
 
+  app.post("/api/admin/questions/clear-all", (req, res) => {
+  try {
+    const state = readDb();
+    state.questions = []; // เคลียร์อาเรย์ข้อสอบให้ว่างเปล่า
+    writeDb(state);
+    res.json({ success: true, message: "ลบข้อสอบทั้งหมดเรียบร้อยแล้ว" });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
   // 🔥 2-Way Sync: สั่ง Push ข้อมูลปัจจุบันขึ้นทับบนชีตด้วยตนเอง
   app.post("/api/admin/google-sheets/push-manual", async (req, res) => {
     const state = readDb();

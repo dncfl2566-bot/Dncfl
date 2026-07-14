@@ -65,6 +65,7 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
   const [cheatingCount, setCheatingCount] = useState(0);
   const [showCheatingWarning, setShowCheatingWarning] = useState(false);
   const [isScreenResizedSmall, setIsScreenResizedSmall] = useState(false);
+  const [isSplitScreen, setIsSplitScreen] = useState(false);
   const [isDismissedSizeWarning, setIsDismissedSizeWarning] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -128,13 +129,26 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
     };
   }, []);
 
-  // Window Resize Monitoring (Maximize Enforcement)
+  // Window Resize Monitoring (Maximize Enforcement & Split Screen Detection)
   useEffect(() => {
     const checkWindowSize = () => {
       // Lower the threshold to standard mobile/tablet boundaries (width < 640px or height < 450px)
       // to support small laptop viewports, zooms, and iframe previews beautifully.
       const isSmall = window.innerWidth < 640 || window.innerHeight < 450;
       setIsScreenResizedSmall(isSmall);
+
+      // We bypass split-screen detection ONLY if embedded in an iframe (e.g. AI Studio Preview window)
+      // so developers can test without being locked out.
+      const isInIframe = window.self !== window.top;
+      if (!isInIframe && screen && screen.width && screen.height) {
+        // Detect side-by-side split-screen (width ratio < 88%) or top-and-bottom split-screen (height ratio < 65%)
+        // This is extremely robust and covers iPad Split View, Slide Over, Samsung Multi Window, and desktop resizing!
+        const isWidthSplit = window.innerWidth < screen.width * 0.88;
+        const isHeightSplit = window.innerHeight < screen.height * 0.65;
+        setIsSplitScreen(isWidthSplit || isHeightSplit);
+      } else {
+        setIsSplitScreen(false);
+      }
     };
 
     checkWindowSize();
@@ -144,6 +158,28 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
       window.removeEventListener('resize', checkWindowSize);
     };
   }, []);
+
+  // Monitor transitions into split-screen or multi-window to count as cheating warning
+  const lastSplitScreenRef = useRef(false);
+  useEffect(() => {
+    if (isExamCompleted) return;
+
+    if (isSplitScreen && !lastSplitScreenRef.current) {
+      // Transitioned into split-screen! Increment cheating count
+      setCheatingCount((prevCount) => {
+        const nextCount = prevCount + 1;
+        if (nextCount >= 3) {
+          triggerAutoSubmit(true);
+        } else if (nextCount === 2) {
+          setShowCheatingWarning(true);
+        } else {
+          console.log("First split-screen warning registered.");
+        }
+        return nextCount;
+      });
+    }
+    lastSplitScreenRef.current = isSplitScreen;
+  }, [isSplitScreen, isExamCompleted]);
 
   // Visibility / Tab Change Monitoring (Anti-cheat 3-strike system)
   useEffect(() => {
@@ -342,30 +378,52 @@ export default function ExamEngine({ student, classroom, onExamSubmitted, onForc
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col select-none relative" id="exam-engine-root">
-      {/* ⚠️ ENFORCED VIEWPORT FULL-SCREEN MAXIMIZE OVERLAY */}
-      {isScreenResizedSmall && !isDismissedSizeWarning && (
-        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[9999] flex flex-col justify-center items-center p-6 text-center text-white">
-          <div className="bg-amber-600 p-4 rounded-full mb-6 animate-pulse">
+      {/* ⚠️ ENFORCED VIEWPORT FULL-SCREEN MAXIMIZE OVERLAY / SPLIT SCREEN LOCK */}
+      {((isScreenResizedSmall && !isDismissedSizeWarning) || isSplitScreen) && (
+        <div className="fixed inset-0 bg-slate-900/98 backdrop-blur-md z-[9999] flex flex-col justify-center items-center p-6 text-center text-white">
+          <div className="bg-red-600 p-5 rounded-full mb-6 animate-pulse shadow-lg shadow-red-900/50">
             <Lock size={48} className="text-white" />
           </div>
-          <h1 className="text-xl font-black text-amber-500 mb-3 tracking-tight">⚠️ ตรวจพบการย่อหน้าจอหรือขนาดหน้าจอขนาดเล็ก!</h1>
-          <p className="max-w-xl text-xs text-slate-300 leading-relaxed mb-4 font-medium">
-            นโยบายการสอบวิชาคณิตศาสตร์: เพื่อป้องกันการทุจริตในการสอบและให้การขีดเขียนวิธีทำมีความสะดวก แนะนำให้เปิดโปรแกรมเต็มจอ (Maximize)
+          <h1 className="text-2xl font-black text-red-500 mb-3 tracking-tight">
+            {isSplitScreen ? '⚠️ ตรวจพบการเปิดแบ่งหน้าจอ (Split Screen / Multi-Window)!' : '⚠️ ตรวจพบการย่อหน้าจอหรือขนาดหน้าจอขนาดเล็ก!'}
+          </h1>
+          <p className="max-w-xl text-sm text-slate-300 leading-relaxed mb-4 font-semibold">
+            {isSplitScreen 
+              ? 'ระบบตรวจพบว่าคุณกำลังแบ่งหน้าจอ เปิดใช้งานหน้าต่างคู่ หรือเปิดบราวเซอร์ขนาดเล็ก ซึ่งเป็นการฝ่าฝืนมาตรการป้องกันการทุจริตในการสอบวิชาคณิตศาสตร์'
+              : 'นโยบายการสอบวิชาคณิตศาสตร์: เพื่อป้องกันการทุจริตในการสอบและให้การขีดเขียนวิธีทำมีความสะดวก แนะนำให้เปิดโปรแกรมเต็มจอ (Maximize)'
+            }
           </p>
-          <p className="bg-white/10 px-6 py-3 rounded-lg text-xs font-semibold text-white max-w-md border border-white/20 mb-6">
-            โปรดขยายหน้าต่างบราวเซอร์ให้กว้างขึ้น เพื่อมุมมองข้อสอบที่เหมาะสมที่สุด
-          </p>
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => setIsDismissedSizeWarning(true)}
-              className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs transition-all shadow-md cursor-pointer"
-            >
-              เข้าใจแล้ว ทำข้อสอบต่อเลย
-            </button>
+          <div className="bg-white/10 px-6 py-4 rounded-xl text-xs font-semibold text-white max-w-md border border-white/10 mb-6 leading-relaxed shadow-inner">
+            {isSplitScreen
+              ? 'กรุณาปิดโหมดแบ่งหน้าจอ ขยายบราวเซอร์ให้เต็มหน้าจอ (Maximize) หรือปิดแอปพลิเคชันอื่นที่เปิดคู่กันอยู่ เพื่อทำการทำข้อสอบต่อ'
+              : 'โปรดขยายหน้าต่างบราวเซอร์ให้กว้างขึ้น เพื่อมุมมองข้อสอบที่เหมาะสมที่สุด'
+            }
+            <div className="mt-3 text-red-400 font-bold border-t border-white/5 pt-2">
+              ⚠️ การพยายามแบ่งหน้าจอจะถูกนับเป็นพฤติกรรมทุจริตและบันทึกในระบบ! (บันทึกเตือน: {cheatingCount} ครั้ง)
+            </div>
           </div>
+          
+          {/* We only show dismiss button for simple size warnings, NEVER for split-screen! */}
+          {!isSplitScreen ? (
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => setIsDismissedSizeWarning(true)}
+                className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs transition-all shadow-md cursor-pointer"
+              >
+                เข้าใจแล้ว ทำข้อสอบต่อเลย
+              </button>
+            </div>
+          ) : (
+            <div className="text-sm font-bold text-red-400 animate-pulse bg-red-950/40 border border-red-900/50 px-4 py-2 rounded-lg">
+              🔒 หน้าจอถูกล็อกจนกว่าจะปิดโหมดแบ่งหน้าจอหรือขยายจอเป็นเต็มจอ
+            </div>
+          )}
           <p className="text-[10px] text-slate-500 font-mono italic mt-6">
-            *ระบบต้องการความกว้างอย่างน้อย 640px, สูงอย่างน้อย 450px
+            {isSplitScreen 
+              ? `ความกว้างปัจจุบัน: ${window.innerWidth}px | ความกว้างหน้าจอจริง: ${screen.width}px`
+              : '*ระบบต้องการความกว้างอย่างน้อย 640px, สูงอย่างน้อย 450px'
+            }
           </p>
         </div>
       )}

@@ -24,6 +24,16 @@ export default function App() {
   const [activeSubmission, setActiveSubmission] = useState<Submission | null>(null);
 
   useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token=')) {
+      if (window.opener) {
+        window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', hash }, '*');
+        window.close();
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem('app_phase', phase);
   }, [phase]);
 

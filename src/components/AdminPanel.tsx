@@ -24,7 +24,13 @@ import {
 } from 'lucide-react';
 import { Student, Question, Submission, QuestionType } from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import MathRenderer from './MathRenderer';
+
+// Initialize Firebase App and Auth once
+const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const firebaseAuth = getAuth(firebaseApp);
 
 interface AdminPanelProps {
   onLogout: () => void;
@@ -159,8 +165,65 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  const connectServerToGoogleSheets = async (token: string) => {
+    try {
+      const res = await fetch('/api/admin/google-sheets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: token })
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        setSheetUrl(data.url);
+        localStorage.setItem('google_spreadsheet_url', data.url);
+        showMsg(`เชื่อมต่อ Google Sheet เพื่อซิงก์ข้อสอบ รายชื่อนักเรียน และผลคะแนนสอบแบบเรียลไทม์สำเร็จแล้ว!`, 'success');
+        // Fetch fresh data that might have been synced/merged from the Sheet
+        fetchData();
+      }
+    } catch (err) {
+      console.error('Error connecting Google Sheets on server:', err);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+
+    // Check Google Sheets status on mount
+    const checkGoogleSheetsStatus = async () => {
+      try {
+        const res = await fetch('/api/admin/google-sheets/status');
+        const data = await res.json();
+        if (data.success && data.url) {
+          setSheetUrl(data.url);
+          localStorage.setItem('google_spreadsheet_url', data.url);
+        }
+      } catch (err) {
+        console.error('Error fetching Google Sheets status:', err);
+      }
+    };
+    checkGoogleSheetsStatus();
+
+    // Listen for postMessage from the popup window (handles cross-origin iframe context beautifully!)
+    const handleGoogleAuthMessage = (event: MessageEvent) => {
+      const origin = event.origin;
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+        return;
+      }
+
+      if (event.data && event.data.type === 'GOOGLE_AUTH_SUCCESS' && event.data.hash) {
+        const hash = event.data.hash;
+        const params = new URLSearchParams(hash.substring(1));
+        const token = params.get('access_token');
+        if (token) {
+          setGoogleAccessToken(token);
+          localStorage.setItem('google_access_token', token);
+          showMsg('เชื่อมต่อบัญชี Google สำเร็จเรียบร้อยแล้ว!', 'success');
+          fetchGoogleProfile(token);
+          connectServerToGoogleSheets(token);
+        }
+      }
+    };
+    window.addEventListener('message', handleGoogleAuthMessage);
 
     // Check Google Auth redirection hash parameters
     const hash = window.location.hash;
@@ -173,13 +236,19 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
         showMsg('เชื่อมต่อบัญชี Google สำเร็จเรียบร้อยแล้ว!', 'success');
         fetchGoogleProfile(token);
+        connectServerToGoogleSheets(token);
       }
     } else {
       const savedToken = localStorage.getItem('google_access_token');
       if (savedToken) {
         fetchGoogleProfile(savedToken);
+        connectServerToGoogleSheets(savedToken);
       }
     }
+
+    return () => {
+      window.removeEventListener('message', handleGoogleAuthMessage);
+    };
   }, []);
 
   const fetchGoogleProfile = async (token: string) => {
@@ -202,32 +271,57 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
-  const handleGoogleLogin = () => {
-    // Standard Google Client ID configured via Cloud Console
-    // Admin is allowed to paste custom client ID in UI settings or use the default
-    const clientId = localStorage.getItem('google_client_id') || firebaseConfig.oAuthClientId || "691304662156-7qds6j1or1fpeo7r5pj8mvaimoa07382.apps.googleusercontent.com";
-    const redirectUri = window.location.origin + '/';
-    const scope = [
-      'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/drive'
-    ].join(' ');
+  const handleGoogleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+      provider.addScope('https://www.googleapis.com/auth/drive.file');
+      provider.addScope('https://www.googleapis.com/auth/drive');
+      
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
 
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-      `client_id=${encodeURIComponent(clientId)}&` +
-      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-      `response_type=token&` +
-      `scope=${encodeURIComponent(scope)}&` +
-      `prompt=select_account`;
+      showMsg('กำลังเปิดหน้าต่างลงชื่อเข้าใช้ Google...', 'info');
+      const result = await signInWithPopup(firebaseAuth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
 
-    window.location.href = authUrl;
+      if (token) {
+        setGoogleAccessToken(token);
+        localStorage.setItem('google_access_token', token);
+        showMsg('เชื่อมต่อบัญชี Google สำเร็จเรียบร้อยแล้ว!', 'success');
+        fetchGoogleProfile(token);
+        connectServerToGoogleSheets(token);
+      } else {
+        showMsg('ไม่ได้รับสิทธิ์การเข้าถึงจากบัญชี Google ของคุณ', 'error');
+      }
+    } catch (err: any) {
+      console.error('Google Auth Error:', err);
+      if (err.code === 'auth/popup-blocked') {
+        alert('กรุณาเปิดการอนุญาตใช้งาน ป๊อปอัป (Pop-ups) ในตัวจัดการบราวเซอร์ของคุณ เพื่อเชื่อมต่อบัญชี Google!');
+      } else {
+        showMsg(`การลงชื่อเข้าใช้ล้มเหลว: ${err.message || err}`, 'error');
+      }
+    }
   };
 
-  const handleGoogleLogout = () => {
+  const handleGoogleLogout = async () => {
     setGoogleAccessToken(null);
     setGoogleUser(null);
     localStorage.removeItem('google_access_token');
     localStorage.removeItem('google_drive_folder_id');
+    localStorage.removeItem('google_spreadsheet_url');
+    try {
+      await firebaseAuth.signOut();
+    } catch (_) {}
+    try {
+      await fetch('/api/admin/google-sheets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: '' })
+      });
+    } catch (_) {}
     showMsg('ยกเลิกการเชื่อมต่อบัญชี Google เรียบร้อย', 'info');
   };
 

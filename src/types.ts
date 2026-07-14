@@ -50,4 +50,6 @@ export interface SystemState {
   students: Student[];
   questions: Question[];
   submissions: Submission[];
+  spreadsheetId?: string;
+  googleAccessToken?: string;
 }

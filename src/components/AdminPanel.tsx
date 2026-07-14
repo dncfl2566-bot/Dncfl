@@ -277,6 +277,40 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
         console.error('Error fetching Google Sheets status:', err);
       }
     };
+    const [isSyncingQuestions, setIsSyncingQuestions] = useState(false);
+
+const handleSyncQuestionsFromSheet = async () => {
+  if (!spreadsheetId) {
+    alert("กรุณาเชื่อมต่อและติดตั้ง Google Sheets ก่อนทำการดึงข้อมูลข้อสอบครับ");
+    return;
+  }
+  
+  if (!confirm("คุณต้องการดึงข้อมูลข้อสอบทั้งหมดจาก Google Sheets มาทับบนระบบใช่หรือไม่? (ข้อสอบเดิมในระบบจะถูกเปลี่ยนตามหน้าชีตปัจจุบัน)")) {
+    return;
+  }
+
+  setIsSyncingQuestions(true);
+  try {
+    const response = await fetch("/api/admin/google-sheets/pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = await response.json();
+    if (data.success) {
+      alert(`ซิงค์สำเร็จ! ระบบตรวจพบข้อสอบทั้งหมดจำนวน ${data.questionsCount} ข้อ และรายชื่อนักเรียน ${data.studentsCount} คน จาก Google Sheets เรียบร้อยแล้วครับ`);
+      // ดึงข้อมูลชุดใหม่มาแสดงผลทันทีบนหน้าจอ
+      fetchQuestions();
+      if (fetchStudents) fetchStudents();
+    } else {
+      alert(`การซิงค์ล้มเหลว: ${data.message}`);
+    }
+  } catch (error) {
+    console.error("Error syncing from sheets:", error);
+    alert("เกิดข้อผิดพลาดในการเชื่อมต่อเพื่อดึงข้อมูลจาก Google Sheets");
+  } finally {
+    setIsSyncingQuestions(false);
+  }
+};
     checkGoogleSheetsStatus();
 
     // Listen for postMessage from the popup window (handles cross-origin iframe context beautifully!)
@@ -942,7 +976,30 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       setLoading(false);
     }
   };
+<div className="flex flex-wrap gap-2 items-center">
+  {/* ปุ่มซิงก์ข้อสอบจากชีตที่เพิ่มเข้ามาใหม่ */}
+  <button
+    onClick={handleSyncQuestionsFromSheet}
+    disabled={isSyncingQuestions}
+    className={`px-3 py-2 text-xs font-bold text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer ${
+      isSyncingQuestions 
+        ? 'bg-slate-400 cursor-not-allowed' 
+        : 'bg-emerald-600 hover:bg-emerald-700'
+    }`}
+  >
+    <RefreshCw size={14} className={isSyncingQuestions ? 'animate-spin' : ''} />
+    <span>{isSyncingQuestions ? 'กำลังดึงข้อมูลข้อสอบ...' : 'ดึงข้อสอบล่าสุดจาก Google Sheets'}</span>
+  </button>
 
+  {/* ปุ่มเดิมที่มีอยู่แล้ว เช่น ปุ่มลบทั้งหมด หรือปุ่มเพิ่มข้อสอบ */}
+  <button
+    onClick={() => setDeleteConfirmInfo({ id: 'all', type: 'bulk-questions' })}
+    className="px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+  >
+    <Trash2 size={13} />
+    <span>ลบข้อสอบทั้งหมดในระบบ</span>
+  </button>
+</div>
   const handleDeleteQuestion = (q: Question) => {
     setDeleteConfirmInfo({
       id: q.id,
@@ -1281,6 +1338,18 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
                 >
                   {googleSyncing ? 'กำลังซิงก์ข้อมูล...' : 'ซิงก์นักเรียนลง Sheet'}
                 </button>
+                {/* สามารถนำโค้ดนี้ไปวางต่อจากปุ่ม ซิงก์นักเรียนลง Sheet เพื่อให้ใช้งานได้ง่ายขึ้นครับ */}
+<button
+  onClick={handleSyncQuestionsFromSheet}
+  disabled={isSyncingQuestions}
+  className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer ${
+    isSyncingQuestions 
+      ? 'bg-slate-400 cursor-not-allowed' 
+      : 'bg-emerald-600 hover:bg-emerald-700'
+  }`}
+>
+  <span>{isSyncingQuestions ? 'กำลังซิงค์ข้อสอบ...' : 'ซิงค์ข้อสอบจาก Sheet'}</span>
+</button>
                 <button
                   type="button"
                   onClick={syncSubmissionsToGoogleSheet}

@@ -356,40 +356,31 @@ const res = await fetch('/api/admin/google-sheets/connect', {
       console.error('Error fetching Google profile:', err);
     }
   };
+const handleGoogleLoginSuccess = async (token: string) => {
+    setGoogleToken(token);
+    localStorage.setItem('google_access_token', token);
+    
+    // ดึง ID สเปรดชีตทั้งสองอันจาก URL ตรงๆ
+    const studentId = '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods';
+    const mainId = '1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U';
 
-  const handleGoogleLogin = async () => {
     try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-      provider.addScope('https://www.googleapis.com/auth/drive.file');
-      provider.addScope('https://www.googleapis.com/auth/drive');
-      
-      provider.setCustomParameters({
-        prompt: 'select_account'
+      const res = await fetch('/api/admin/google-sheets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: token,
+          spreadsheetId: mainId,        // ลิงก์ 2
+          studentSpreadsheetId: studentId // ลิงก์ 1
+        })
       });
-
-      showMsg('กำลังเปิดหน้าต่างลงชื่อเข้าใช้ Google...', 'info');
-      const result = await signInWithPopup(firebaseAuth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-
-      if (token) {
-        setGoogleAccessToken(token);
-        localStorage.setItem('google_access_token', token);
-        showMsg('เชื่อมต่อบัญชี Google สำเร็จเรียบร้อยแล้ว!', 'success');
-        fetchGoogleProfile(token);
-        connectServerToGoogleSheets(token);
-      } else {
-        showMsg('ไม่ได้รับสิทธิ์การเข้าถึงจากบัญชี Google ของคุณ', 'error');
-      }
-    } catch (err: any) {
-      console.error('Google Auth Error:', err);
-      if (err.code === 'auth/popup-blocked') {
-        alert('กรุณาเปิดการอนุญาตใช้งาน ป๊อปอัป (Pop-ups) ในตัวจัดการบราวเซอร์ของคุณ เพื่อเชื่อมต่อบัญชี Google!');
-      } else {
-        showMsg(`การลงชื่อเข้าใช้ล้มเหลว: ${err.message || err}`, 'error');
-      }
-    }
+      const data = await res.json();
+      if (data.success) {
+        setIsConnected(true);
+        showMsg('เชื่อมต่อกับ Google Sheets ทั้งสองสเปรดชีตสำเร็จ!', 'success');
+        await fetchAllData();
+      } else { showMsg(data.message || 'เชื่อมต่อสเปรดชีตไม่สำเร็จ', 'error'); }
+    } catch (err) { showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error'); }
   };
 
   const handleGoogleLogout = async () => {

@@ -275,7 +275,78 @@ async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state
         q.correctAnswer
       ]);
     });
+// 💡 ฟังก์ชันซิงค์ข้อมูลขึ้น Google Sheets แยกตาม 2 ลิงก์สเปรดชีต
+async function pushAllToGoogleSheets(accessToken: string, studentId: string, mainId: string, state: SystemState) {
+  const urlMain = `https://sheets.googleapis.com/v4/spreadsheets/${mainId}/values:batchUpdate`;
+  const urlStudent = `https://sheets.googleapis.com/v4/spreadsheets/${studentId}/values:batchUpdate`;
 
+  // เตรียมข้อมูลชุดที่ 1: รายชื่อนักเรียน (ส่งไปลิงก์แรก)
+  const studentRows = [["ID", "Name", "Classroom", "Number", "Password"]];
+  state.students.forEach(s => studentRows.push([s.id, s.name, s.classroom, s.number || "", s.password || s.id]));
+
+  // เตรียมข้อมูลชุดที่ 2: ข้อสอบและผลการสอบ (ส่งไปลิงก์ที่สอง)
+  const questionRows = [["ID", "Code", "Level", "Type", "Choices", "Question", "Answer", "Solution", "Image"]];
+  state.questions.forEach(q => questionRows.push([q.id, q.code, q.level, q.type, JSON.stringify(q.choices), q.question, q.answer, q.solution || "", q.image || ""]));
+
+  const submissionRows = [["ID", "StudentID", "StudentName", "Classroom", "Score", "TotalQuestions", "SubmittedAt", "Answers", "CheatingAttempts", "TabSwitches", "FaceOuts", "IsCheater", "Logs", "WrittenAnswers"]];
+  state.submissions.forEach(s => submissionRows.push([s.id, s.studentId, s.studentName, s.classroom, String(s.score), String(s.totalQuestions), s.submittedAt, JSON.stringify(s.answers), String(s.cheatingAttempts || 0), String(s.tabSwitches || 0), String(s.faceOuts || 0), String(s.isCheater || false), JSON.stringify(s.logs || []), JSON.stringify(s.writtenAnswers || {})]));
+
+  // ล้างค่าเก่าและบันทึกรายชื่อลงสเปรดชีตลิงก์แรก
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentId}/values:batchClear`, {
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ ranges: ["Students!A:E"] })
+  });
+  await fetch(urlStudent, {
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: [{ range: "Students!A:E", values: studentRows }] })
+  });
+
+  // ล้างค่าเก่าและบันทึกข้อสอบ + ผลสอบลงสเปรดชีตลิงก์ที่สอง
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainId}/values:batchClear`, {
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ ranges: ["Questions!A:I", "Submissions!A:N"] })
+  });
+  await fetch(urlMain, {
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: [{ range: "Questions!A:I", values: questionRows }, { range: "Submissions!A:N", values: submissionRows }] })
+  });
+}
+
+// 💡 ฟังก์ชันดึงข้อมูลลงมาจาก Google Sheets (อ่านรายชื่อจากลิงก์ 1 และผลสอบจากลิงก์ 2)
+async function pullAllFromGoogleSheets(accessToken: string, studentId: string, mainId: string) {
+  const state = readDb();
+  
+  // 1. ดึงรายชื่อนักเรียนจากลิงก์ที่ 1
+  const resStudent = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentId}/values/Students!A:E`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (resStudent.ok) {
+    const dataStudent = await resStudent.json();
+    if (dataStudent.values && dataStudent.values.length > 1) {
+      state.students = dataStudent.values.slice(1).map((row: any) => ({ id: row[0]||"", name: row[1]||"", classroom: row[2]||"", number: row[3]||"", password: row[4]||"" }));
+    }
+  }
+
+  // 2. ดึงข้อมูลข้อสอบและประวัติผลการสอบจากลิงก์ที่ 2
+  const resMain = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainId}/values:batchGet?ranges=Questions!A:I&ranges=Submissions!A:N`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (resMain.ok) {
+    const dataMain = await resMain.json();
+    const valueRanges = dataMain.valueRanges || [];
+    
+    if (valueRanges[0]?.values?.length > 1) {
+      state.questions = valueRanges[0].values.slice(1).map((row: any) => {
+        let choices = ["", "", "", "", ""];
+        try { choices = JSON.parse(row[4]); } catch { if (row[4]) choices = row[4].split(","); }
+        return { id: row[0]||"", code: row[1]||"", level: row[2]||"", type: row[3]||"multiple-choice", question: row[5]||"", choices, answer: row[6]||"0", solution: row[7]||"", image: row[8]||"" };
+      });
+    }
+    if (valueRanges[1]?.values?.length > 1) {
+      state.submissions = valueRanges[1].values.slice(1).map((row: any) => ({ id: row[0]||"", studentId: row[1]||"", studentName: row[2]||"", classroom: row[3]||"", score: Number(row[4]||0), totalQuestions: Number(row[5]||0), submittedAt: row[6]||"", answers: row[7]?JSON.parse(row[7]):{}, cheatingAttempts: Number(row[8]||0), tabSwitches: Number(row[9]||0), faceOuts: Number(row[10]||0), isCheater: row[11]==='true', logs: row[12]?JSON.parse(row[12]):[], writtenAnswers: row[13]?JSON.parse(row[13]):{} }));
+    }
+  }
+
+  writeDb(state);
+  return state;
+}
+    
     // 2. Push Students
     const studentHeaders = ["ID", "Name", "Class", "Number"];
     const studentRows = [studentHeaders];

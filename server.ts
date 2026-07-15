@@ -407,7 +407,7 @@ async function pullAllFromGoogleSheets(accessToken: string, studentSpreadsheetId
     } else {
       console.log("Successfully synchronized all data to Google Sheets in background!");
     }
-  } catch (err) {
+   catch (err) {
     console.error("Error pushing data to Google Sheets:", err);
   }
 }

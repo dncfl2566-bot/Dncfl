@@ -84,7 +84,51 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [sheetUrl, setSheetUrl] = useState(() => {
     return localStorage.getItem('google_main_sheet_url') || 'https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056';
   });
+// 💡 1. ประกาศตัวแปรเก็บ URL ของสเปรดชีตทั้ง 2 ลิงก์แยกจากกัน พร้อมระบบจำค่าลง LocalStorage
+  const [studentSheetUrl, setStudentSheetUrl] = useState(() => {
+    return localStorage.getItem('google_roster_sheet_url') || 'https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0';
+  });
 
+  const [sheetUrl, setSheetUrl] = useState(() => {
+    return localStorage.getItem('google_main_sheet_url') || 'https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056';
+  });
+
+  // 💡 2. แก้ไขฟังก์ชันตอนเชื่อมต่อสำเร็จ ให้ดึง ID จาก URL ส่งเข้าหลังบ้านคู่กัน
+  const handleGoogleLoginSuccess = async (token: string) => {
+    setGoogleToken(token);
+    localStorage.setItem('google_access_token', token);
+    
+    const extractId = (url: string) => {
+      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      return match ? match[1] : '';
+    };
+
+    const studentSpreadsheetId = extractId(studentSheetUrl) || '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods';
+    const mainSpreadsheetId = extractId(sheetUrl) || '1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U';
+
+    try {
+      const res = await fetch('/api/admin/google-sheets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: token,
+          spreadsheetId: mainSpreadsheetId,        // ลิงก์ 2
+          studentSpreadsheetId: studentSpreadsheetId // ลิงก์ 1
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsConnected(true);
+        if (data.examStatus) setExamStatus(data.examStatus);
+        showMsg('เชื่อมต่อบัญชี Google และสเปรดชีตแยกข้อมูลสำเร็จ!', 'success');
+        await fetchAllData();
+      } else {
+        showMsg(data.message || 'เชื่อมต่อสเปรดชีตไม่สำเร็จ', 'error');
+      }
+    } catch (err) {
+      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+    }
+  };
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionForm, setQuestionForm] = useState<{

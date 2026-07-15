@@ -215,7 +215,13 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
     }
   };
-
+const handleSaveSheetSettings = () => {
+  // สั่งเซฟข้อมูลทั้งคู่ลงคอมพิวเตอร์พร้อมกันตอนกดปุ่ม
+  localStorage.setItem('google_roster_sheet_url', studentSheetUrl);
+  localStorage.setItem('google_main_sheet_url', sheetUrl);
+  
+  showMsg('บันทึกตำแหน่งลิงก์ Google Sheets ลงในเครื่องเรียบร้อยแล้ว', 'success');
+};
   const connectServerToGoogleSheets = async (token: string) => {
     try {
       // ค้นหาจุดที่มีการยิง fetch เพื่อต่อชีต แล้วแทนที่ Body ด้วยชุดแยก ID ตัวนี้:

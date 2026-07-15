@@ -256,31 +256,12 @@ async function uploadToGoogleDrive(token: string, folderId: string, filename: st
 
 // --- GOOGLE SHEETS INTEGRATION HELPERS ---
 
-async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state: SystemState) {
-  try {
-    // 1. Push Questions
-    const questionHeaders = ["ID", "GradeLevel", "Set", "Type", "QuestionNumber", "Text", "Image", "Choices", "ChoiceImages", "CorrectAnswer"];
-    const questionRows = [questionHeaders];
-    state.questions.forEach(q => {
-      questionRows.push([
-        q.id,
-        q.gradeLevel,
-        q.set,
-        q.type,
-        q.questionNumber.toString(),
-        q.text,
-        q.image || "",
-        q.choices ? JSON.stringify(q.choices) : "",
-        q.choiceImages ? JSON.stringify(q.choiceImages) : "",
-        q.correctAnswer
-      ]);
-    });
-// 💡 แก้ไขฟังก์ชันให้ Push ข้อมูลแยกตาม 2 ลิงก์ชีตอย่างถูกต้อง
+// 💡 เปลี่ยนฟังก์ชัน Push ให้แยกส่งข้อมูลไปตามสเปรดชีตที่ถูกต้อง
 async function pushAllToGoogleSheets(accessToken: string, studentSpreadsheetId: string, mainSpreadsheetId: string, state: SystemState) {
   const urlMain = `https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchUpdate`;
   const urlStudent = `https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values:batchUpdate`;
 
-  // 1. ส่งรายชื่อนักเรียนไปลิงก์แรก (studentSpreadsheetId)
+  // 1. จัดการชีตรายชื่อนักเรียน (สเปรดชีตตัวแรก)
   const studentRows = [["ID", "Name", "Classroom", "Number", "Password"]];
   state.students.forEach(s => studentRows.push([s.id, s.name, s.classroom, s.number || "", s.password || s.id]));
 
@@ -293,7 +274,7 @@ async function pushAllToGoogleSheets(accessToken: string, studentSpreadsheetId: 
     body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: [{ range: "Students!A:E", values: studentRows }] })
   });
 
-  // 2. ส่งข้อสอบและประวัติผลการสอบไปลิงก์ที่สอง (mainSpreadsheetId)
+  // 2. จัดการชีตข้อสอบและผลการสอบ (สเปรดชีตตัวที่สอง)
   const questionRows = [["ID", "Code", "Level", "Type", "Choices", "Question", "Answer", "Solution", "Image"]];
   state.questions.forEach(q => questionRows.push([q.id, q.code, q.level, q.type, JSON.stringify(q.choices), q.question, q.answer, q.solution || "", q.image || ""]));
 
@@ -310,11 +291,11 @@ async function pushAllToGoogleSheets(accessToken: string, studentSpreadsheetId: 
   });
 }
 
-// 💡 แก้ไขฟังก์ชัน Pull ให้ดึงรายชื่อจากลิงก์ 1 และข้อสอบ/ประวัติผลสอบจากลิงก์ 2
+// 💡 เปลี่ยนฟังก์ชัน Pull ให้ดึงรายชื่อจากชีต 1 และดึงข้อสอบ/คะแนนจากชีต 2
 async function pullAllFromGoogleSheets(accessToken: string, studentSpreadsheetId: string, mainSpreadsheetId: string) {
   const state = readDb();
 
-  // ดึงรายชื่อนักเรียน (ลิงก์ที่ 1)
+  // ดึงรายชื่อนักเรียนจากสเปรดชีต 1
   const resStudent = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values/Students!A:E`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (resStudent.ok) {
     const dataStudent = await resStudent.json();
@@ -323,7 +304,7 @@ async function pullAllFromGoogleSheets(accessToken: string, studentSpreadsheetId
     }
   }
 
-  // ดึงข้อสอบและผลการทำข้อสอบ (ลิงก์ที่ 2)
+  // ดึงข้อสอบและผลการสอบจากสเปรดชีต 2
   const resMain = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchGet?ranges=Questions!A:I&ranges=Submissions!A:N`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (resMain.ok) {
     const dataMain = await resMain.json();

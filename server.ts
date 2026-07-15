@@ -275,24 +275,16 @@ async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state
         q.correctAnswer
       ]);
     });
-// 💡 ฟังก์ชันซิงค์ข้อมูลขึ้น Google Sheets แยกตาม 2 ลิงก์สเปรดชีต
-async function pushAllToGoogleSheets(accessToken: string, studentId: string, mainId: string, state: SystemState) {
-  const urlMain = `https://sheets.googleapis.com/v4/spreadsheets/${mainId}/values:batchUpdate`;
-  const urlStudent = `https://sheets.googleapis.com/v4/spreadsheets/${studentId}/values:batchUpdate`;
+// 💡 แก้ไขฟังก์ชันให้ Push ข้อมูลแยกตาม 2 ลิงก์ชีตอย่างถูกต้อง
+async function pushAllToGoogleSheets(accessToken: string, studentSpreadsheetId: string, mainSpreadsheetId: string, state: SystemState) {
+  const urlMain = `https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchUpdate`;
+  const urlStudent = `https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values:batchUpdate`;
 
-  // เตรียมข้อมูลชุดที่ 1: รายชื่อนักเรียน (ส่งไปลิงก์แรก)
+  // 1. ส่งรายชื่อนักเรียนไปลิงก์แรก (studentSpreadsheetId)
   const studentRows = [["ID", "Name", "Classroom", "Number", "Password"]];
   state.students.forEach(s => studentRows.push([s.id, s.name, s.classroom, s.number || "", s.password || s.id]));
 
-  // เตรียมข้อมูลชุดที่ 2: ข้อสอบและผลการสอบ (ส่งไปลิงก์ที่สอง)
-  const questionRows = [["ID", "Code", "Level", "Type", "Choices", "Question", "Answer", "Solution", "Image"]];
-  state.questions.forEach(q => questionRows.push([q.id, q.code, q.level, q.type, JSON.stringify(q.choices), q.question, q.answer, q.solution || "", q.image || ""]));
-
-  const submissionRows = [["ID", "StudentID", "StudentName", "Classroom", "Score", "TotalQuestions", "SubmittedAt", "Answers", "CheatingAttempts", "TabSwitches", "FaceOuts", "IsCheater", "Logs", "WrittenAnswers"]];
-  state.submissions.forEach(s => submissionRows.push([s.id, s.studentId, s.studentName, s.classroom, String(s.score), String(s.totalQuestions), s.submittedAt, JSON.stringify(s.answers), String(s.cheatingAttempts || 0), String(s.tabSwitches || 0), String(s.faceOuts || 0), String(s.isCheater || false), JSON.stringify(s.logs || []), JSON.stringify(s.writtenAnswers || {})]));
-
-  // ล้างค่าเก่าและบันทึกรายชื่อลงสเปรดชีตลิงก์แรก
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentId}/values:batchClear`, {
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values:batchClear`, {
     method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ ranges: ["Students!A:E"] })
   });
@@ -301,8 +293,14 @@ async function pushAllToGoogleSheets(accessToken: string, studentId: string, mai
     body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: [{ range: "Students!A:E", values: studentRows }] })
   });
 
-  // ล้างค่าเก่าและบันทึกข้อสอบ + ผลสอบลงสเปรดชีตลิงก์ที่สอง
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainId}/values:batchClear`, {
+  // 2. ส่งข้อสอบและประวัติผลการสอบไปลิงก์ที่สอง (mainSpreadsheetId)
+  const questionRows = [["ID", "Code", "Level", "Type", "Choices", "Question", "Answer", "Solution", "Image"]];
+  state.questions.forEach(q => questionRows.push([q.id, q.code, q.level, q.type, JSON.stringify(q.choices), q.question, q.answer, q.solution || "", q.image || ""]));
+
+  const submissionRows = [["ID", "StudentID", "StudentName", "Classroom", "Score", "TotalQuestions", "SubmittedAt", "Answers", "CheatingAttempts", "TabSwitches", "FaceOuts", "IsCheater", "Logs", "WrittenAnswers"]];
+  state.submissions.forEach(s => submissionRows.push([s.id, s.studentId, s.studentName, s.classroom, String(s.score), String(s.totalQuestions), s.submittedAt, JSON.stringify(s.answers), String(s.cheatingAttempts || 0), String(s.tabSwitches || 0), String(s.faceOuts || 0), String(s.isCheater || false), JSON.stringify(s.logs || []), JSON.stringify(s.writtenAnswers || {})]));
+
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchClear`, {
     method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ ranges: ["Questions!A:I", "Submissions!A:N"] })
   });
@@ -312,12 +310,12 @@ async function pushAllToGoogleSheets(accessToken: string, studentId: string, mai
   });
 }
 
-// 💡 ฟังก์ชันดึงข้อมูลลงมาจาก Google Sheets (อ่านรายชื่อจากลิงก์ 1 และผลสอบจากลิงก์ 2)
-async function pullAllFromGoogleSheets(accessToken: string, studentId: string, mainId: string) {
+// 💡 แก้ไขฟังก์ชัน Pull ให้ดึงรายชื่อจากลิงก์ 1 และข้อสอบ/ประวัติผลสอบจากลิงก์ 2
+async function pullAllFromGoogleSheets(accessToken: string, studentSpreadsheetId: string, mainSpreadsheetId: string) {
   const state = readDb();
-  
-  // 1. ดึงรายชื่อนักเรียนจากลิงก์ที่ 1
-  const resStudent = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentId}/values/Students!A:E`, { headers: { Authorization: `Bearer ${accessToken}` } });
+
+  // ดึงรายชื่อนักเรียน (ลิงก์ที่ 1)
+  const resStudent = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values/Students!A:E`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (resStudent.ok) {
     const dataStudent = await resStudent.json();
     if (dataStudent.values && dataStudent.values.length > 1) {
@@ -325,8 +323,8 @@ async function pullAllFromGoogleSheets(accessToken: string, studentId: string, m
     }
   }
 
-  // 2. ดึงข้อมูลข้อสอบและประวัติผลการสอบจากลิงก์ที่ 2
-  const resMain = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainId}/values:batchGet?ranges=Questions!A:I&ranges=Submissions!A:N`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  // ดึงข้อสอบและผลการทำข้อสอบ (ลิงก์ที่ 2)
+  const resMain = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchGet?ranges=Questions!A:I&ranges=Submissions!A:N`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (resMain.ok) {
     const dataMain = await resMain.json();
     const valueRanges = dataMain.valueRanges || [];

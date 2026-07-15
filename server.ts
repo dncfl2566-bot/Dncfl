@@ -1133,46 +1133,23 @@ async function startServer() {
   });
 
   // ADMIN API: Add/edit question (supports batch)
-  app.post("/api/admin/questions", (req, res) => {
-    const { question, questions, deleteId } = req.body;
-    const state = readDb();
-
-    if (questions && Array.isArray(questions)) {
-      for (const q of questions) {
-        if (!q || !q.id) continue;
-        const idx = state.questions.findIndex(item => item.id === q.id);
-        if (idx > -1) {
-          state.questions[idx] = q;
-        } else {
-          state.questions.push(q);
-        }
-      }
-
-      if (deleteId) {
-        state.questions = state.questions.filter(item => item.id !== deleteId);
-      }
-
+  app.post("/api/admin/questions", async (req, res) => {
+    try {
+      const q = req.body as Question;
+      const state = readDb();
+      if (!q.id) q.id = "q_" + Date.now();
+      const idx = state.questions.findIndex(x => x.id === q.id);
+      if (idx >= 0) state.questions[idx] = q; else state.questions.push(q);
       writeDb(state);
-      return res.json({ success: true, count: questions.length });
-    }
 
-    if (!question || !question.id) {
-      return res.status(400).json({ success: false, message: "ข้อมูลข้อสอบไม่ถูกต้อง" });
-    }
+      // 💡 ส่งข้อมูลข้อสอบชุดใหม่ขึ้น Google Sheets ทันทีอัตโนมัติ
+      if (state.googleAccessToken && state.spreadsheetId) {
+        const studentId = (state as any).studentSpreadsheetId || "1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods";
+        await pushAllToGoogleSheets(state.googleAccessToken, studentId, state.spreadsheetId, state).catch(console.error);
+      }
 
-    const idx = state.questions.findIndex(q => q.id === question.id);
-    if (idx > -1) {
-      state.questions[idx] = question;
-    } else {
-      state.questions.push(question);
-    }
-
-    if (deleteId) {
-      state.questions = state.questions.filter(item => item.id !== deleteId);
-    }
-
-    writeDb(state);
-    res.json({ success: true, question });
+      res.json({ success: true, question: q });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
   });
 
   // ADMIN API: Delete all questions

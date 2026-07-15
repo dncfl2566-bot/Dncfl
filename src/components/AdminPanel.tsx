@@ -214,11 +214,16 @@ const [mainSheetUrl, setMainSheetUrl] = useState('https://docs.google.com/spread
 
   const connectServerToGoogleSheets = async (token: string) => {
     try {
-      const res = await fetch('/api/admin/google-sheets/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: token })
-      });
+      // ค้นหาจุดที่มีการยิง fetch เพื่อต่อชีต แล้วแทนที่ Body ด้วยชุดแยก ID ตัวนี้:
+const res = await fetch('/api/admin/google-sheets/connect', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    accessToken: token,
+    studentSpreadsheetId: '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods', // ลิงก์รายชื่อ (1)
+    spreadsheetId: '1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U' // ลิงก์หลักเก็บข้อมูล (2)
+  })
+});
       const data = await res.json();
       if (data.success && data.url) {
         setSheetUrl(data.url);

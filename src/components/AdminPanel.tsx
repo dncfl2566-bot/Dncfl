@@ -75,60 +75,20 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [studentForm, setStudentForm] = useState({ id: '', name: '', class: '3/2', number: 1 });
   const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ id: string, type: 'student' | 'question' | 'submission' | 'bulk-questions', name: string } | null>(null);
 
-  // 💡 1. ลิงก์รายชื่อนักเรียน (ให้เก็บในคีย์ google_roster_sheet_url)
-  const [studentSheetUrl, setStudentSheetUrl] = useState(() => {
+  const [sheetUrl, setSheetUrl] = useState(() => {
+    return localStorage.getItem('google_spreadsheet_url') || 'https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056';
+  });
+  const [inputSheetUrl, setInputSheetUrl] = useState('');
+  const [rosterSheetUrl, setRosterSheetUrl] = useState(() => {
     return localStorage.getItem('google_roster_sheet_url') || 'https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0';
   });
 
-  // 💡 2. ลิงก์หลักเก็บข้อมูลข้อสอบ/คะแนน (ให้เก็บในคีย์ google_main_sheet_url)
-  const [sheetUrl, setSheetUrl] = useState(() => {
-    return localStorage.getItem('google_main_sheet_url') || 'https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056';
-  });
-// 💡 1. ประกาศตัวแปรเก็บ URL ของสเปรดชีตทั้ง 2 ลิงก์แยกจากกัน พร้อมระบบจำค่าลง LocalStorage
-  const [studentSheetUrl, setStudentSheetUrl] = useState(() => {
-    return localStorage.getItem('google_roster_sheet_url') || 'https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0';
-  });
-
-  const [sheetUrl, setSheetUrl] = useState(() => {
-    return localStorage.getItem('google_main_sheet_url') || 'https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056';
-  });
-
-  // 💡 2. แก้ไขฟังก์ชันตอนเชื่อมต่อสำเร็จ ให้ดึง ID จาก URL ส่งเข้าหลังบ้านคู่กัน
-  const handleGoogleLoginSuccess = async (token: string) => {
-    setGoogleToken(token);
-    localStorage.setItem('google_access_token', token);
-    
-    const extractId = (url: string) => {
-      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      return match ? match[1] : '';
-    };
-
-    const studentSpreadsheetId = extractId(studentSheetUrl) || '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods';
-    const mainSpreadsheetId = extractId(sheetUrl) || '1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U';
-
-    try {
-      const res = await fetch('/api/admin/google-sheets/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accessToken: token,
-          spreadsheetId: mainSpreadsheetId,        // ลิงก์ 2
-          studentSpreadsheetId: studentSpreadsheetId // ลิงก์ 1
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setIsConnected(true);
-        if (data.examStatus) setExamStatus(data.examStatus);
-        showMsg('เชื่อมต่อบัญชี Google และสเปรดชีตแยกข้อมูลสำเร็จ!', 'success');
-        await fetchAllData();
-      } else {
-        showMsg(data.message || 'เชื่อมต่อสเปรดชีตไม่สำเร็จ', 'error');
-      }
-    } catch (err) {
-      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+  useEffect(() => {
+    if (sheetUrl) {
+      setInputSheetUrl(sheetUrl);
     }
-  };
+  }, [sheetUrl]);
+
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionForm, setQuestionForm] = useState<{
@@ -259,25 +219,18 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
       showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
     }
   };
-const handleSaveSheetSettings = () => {
-  // สั่งเซฟข้อมูลทั้งคู่ลงคอมพิวเตอร์พร้อมกันตอนกดปุ่ม
-  localStorage.setItem('google_roster_sheet_url', studentSheetUrl);
-  localStorage.setItem('google_main_sheet_url', sheetUrl);
-  
-  showMsg('บันทึกตำแหน่งลิงก์ Google Sheets ลงในเครื่องเรียบร้อยแล้ว', 'success');
-};
+
   const connectServerToGoogleSheets = async (token: string) => {
     try {
-      // ค้นหาจุดที่มีการยิง fetch เพื่อต่อชีต แล้วแทนที่ Body ด้วยชุดแยก ID ตัวนี้:
-const res = await fetch('/api/admin/google-sheets/connect', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    accessToken: token,
-    studentSpreadsheetId: '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods', // ลิงก์รายชื่อ (1)
-    spreadsheetId: '1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U' // ลิงก์หลักเก็บข้อมูล (2)
-  })
-});
+      const savedSpreadsheetUrl = localStorage.getItem('google_spreadsheet_url') || 'https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056';
+      const res = await fetch('/api/admin/google-sheets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          accessToken: token,
+          spreadsheetUrl: savedSpreadsheetUrl
+        })
+      });
       const data = await res.json();
       if (data.success && data.url) {
         setSheetUrl(data.url);
@@ -373,9 +326,14 @@ const res = await fetch('/api/admin/google-sheets/connect', {
   const handleBidirectionalSync = async () => {
     setGoogleSyncing(true);
     try {
+      const currentSpreadsheetId = getCurrentSpreadsheetId();
       const res = await fetch('/api/admin/google-sheets/sync', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: googleAccessToken,
+          spreadsheetId: currentSpreadsheetId
+        })
       });
       const data = await res.json();
       if (data.success) {
@@ -385,6 +343,76 @@ const res = await fetch('/api/admin/google-sheets/connect', {
         showMsg(data.message || 'ซิงค์ข้อมูลไม่สำเร็จ', 'error');
       }
     } catch (err) {
+      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
+    } finally {
+      setGoogleSyncing(false);
+    }
+  };
+
+  const handleForceCreateNewSheet = async () => {
+    if (!googleAccessToken) {
+      showMsg('กรุณาเชื่อมต่อบัญชี Google ก่อนสร้างชีตใหม่', 'error');
+      return;
+    }
+    setGoogleSyncing(true);
+    showMsg('กำลังสร้าง Google Sheet ใหม่ในบัญชีของคุณ...', 'info');
+    try {
+      const res = await fetch('/api/admin/google-sheets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          accessToken: googleAccessToken,
+          forceCreate: true
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        setSheetUrl(data.url);
+        localStorage.setItem('google_spreadsheet_url', data.url);
+        showMsg(`สร้างและเชื่อมต่อ Google Sheet ใหม่สำเร็จ! ข้อมูลทั้งหมดถูกซิงก์เรียบร้อยแล้ว`, 'success');
+        await fetchData();
+      } else {
+        showMsg(data.message || 'สร้างชีตใหม่ล้มเหลว', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์เพื่อสร้างชีตใหม่', 'error');
+    } finally {
+      setGoogleSyncing(false);
+    }
+  };
+
+  const handleManualConnectSheet = async () => {
+    if (!googleAccessToken) {
+      showMsg('กรุณาเชื่อมต่อบัญชี Google ก่อนเปลี่ยนชีต', 'error');
+      return;
+    }
+    if (!inputSheetUrl.trim()) {
+      showMsg('กรุณากรอกลิงก์ Google Sheet ที่ต้องการเชื่อมต่อ', 'error');
+      return;
+    }
+    setGoogleSyncing(true);
+    showMsg('กำลังทดสอบและเชื่อมต่อ Google Sheet...', 'info');
+    try {
+      const res = await fetch('/api/admin/google-sheets/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          accessToken: googleAccessToken,
+          spreadsheetUrl: inputSheetUrl.trim()
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        setSheetUrl(data.url);
+        localStorage.setItem('google_spreadsheet_url', data.url);
+        showMsg(`เชื่อมต่อและซิงก์ข้อมูลกับ Google Sheet สำเร็จแล้ว!`, 'success');
+        await fetchData();
+      } else {
+        showMsg(data.message || 'เชื่อมต่อชีตล้มเหลว กรุณาตรวจสอบว่ามีสิทธิ์แก้ไขและลิงก์ถูกต้อง', 'error');
+      }
+    } catch (err) {
+      console.error(err);
       showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error');
     } finally {
       setGoogleSyncing(false);
@@ -410,31 +438,40 @@ const res = await fetch('/api/admin/google-sheets/connect', {
       console.error('Error fetching Google profile:', err);
     }
   };
-const handleGoogleLoginSuccess = async (token: string) => {
-    setGoogleToken(token);
-    localStorage.setItem('google_access_token', token);
-    
-    // ดึง ID สเปรดชีตทั้งสองอันจาก URL ตรงๆ
-    const studentId = '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods';
-    const mainId = '1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U';
 
+  const handleGoogleLogin = async () => {
     try {
-      const res = await fetch('/api/admin/google-sheets/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accessToken: token,
-          spreadsheetId: mainId,        // ลิงก์ 2
-          studentSpreadsheetId: studentId // ลิงก์ 1
-        })
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+      provider.addScope('https://www.googleapis.com/auth/drive.file');
+      provider.addScope('https://www.googleapis.com/auth/drive');
+      
+      provider.setCustomParameters({
+        prompt: 'select_account'
       });
-      const data = await res.json();
-      if (data.success) {
-        setIsConnected(true);
-        showMsg('เชื่อมต่อกับ Google Sheets ทั้งสองสเปรดชีตสำเร็จ!', 'success');
-        await fetchAllData();
-      } else { showMsg(data.message || 'เชื่อมต่อสเปรดชีตไม่สำเร็จ', 'error'); }
-    } catch (err) { showMsg('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', 'error'); }
+
+      showMsg('กำลังเปิดหน้าต่างลงชื่อเข้าใช้ Google...', 'info');
+      const result = await signInWithPopup(firebaseAuth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+
+      if (token) {
+        setGoogleAccessToken(token);
+        localStorage.setItem('google_access_token', token);
+        showMsg('เชื่อมต่อบัญชี Google สำเร็จเรียบร้อยแล้ว!', 'success');
+        fetchGoogleProfile(token);
+        connectServerToGoogleSheets(token);
+      } else {
+        showMsg('ไม่ได้รับสิทธิ์การเข้าถึงจากบัญชี Google ของคุณ', 'error');
+      }
+    } catch (err: any) {
+      console.error('Google Auth Error:', err);
+      if (err.code === 'auth/popup-blocked') {
+        alert('กรุณาเปิดการอนุญาตใช้งาน ป๊อปอัป (Pop-ups) ในตัวจัดการบราวเซอร์ของคุณ เพื่อเชื่อมต่อบัญชี Google!');
+      } else {
+        showMsg(`การลงชื่อเข้าใช้ล้มเหลว: ${err.message || err}`, 'error');
+      }
+    }
   };
 
   const handleGoogleLogout = async () => {
@@ -522,7 +559,7 @@ const handleGoogleLoginSuccess = async (token: string) => {
     if (matches && matches[1]) {
       return matches[1];
     }
-    return '1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods'; // Fallback
+    return '1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U'; // Fallback
   };
 
   // Upload image logic (Supports Google Drive Folder & Local backup)
@@ -603,62 +640,10 @@ const handleGoogleLoginSuccess = async (token: string) => {
   // Sync Students to Google Sheet
   const syncStudentsToGoogleSheet = async (listToSync = students) => {
     if (!googleAccessToken) {
-      return; // Skip if not logged in
+      showMsg('กรุณาเชื่อมต่อ Google ก่อนทำการซิงก์ข้อมูล', 'error');
+      return;
     }
-
-    setGoogleSyncing(true);
-    try {
-      const spreadsheetId = getCurrentSpreadsheetId();
-      
-      // Clear current contents of A:E
-      const clearRange = 'Sheet1!A:E';
-      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${googleAccessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      // Prepare data
-      const values = [
-        ['รหัสนักเรียน (ID)', 'ชื่อ-นามสกุล', 'ชั้นเรียน', 'เลขที่', 'วันที่เพิ่มเข้าชีต']
-      ];
-
-      listToSync.forEach(s => {
-        values.push([
-          s.id,
-          s.name,
-          `ม.${s.class}`,
-          s.number.toString(),
-          new Date().toLocaleDateString('th-TH')
-        ]);
-      });
-
-      const updateRange = 'Sheet1!A1';
-      const url = `https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
-
-      const res = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${googleAccessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ values })
-      });
-
-      if (res.ok) {
-        showMsg('ซิงก์ข้อมูลนักเรียนทั้งหมดขึ้น Google Sheet ของคุณสำเร็จแล้ว!', 'success');
-      } else {
-        const errorData = await res.json();
-        throw new Error(errorData.error?.message || 'Failed to update sheet');
-      }
-    } catch (err: any) {
-      console.error('Sheet sync error:', err);
-      showMsg(`ซิงก์ขึ้น Google Sheet ล้มเหลว: ${err.message}`, 'error');
-    } finally {
-      setGoogleSyncing(false);
-    }
+    await handleBidirectionalSync();
   };
 
   // Sync Submissions and Grades to Google Sheet
@@ -667,114 +652,7 @@ const handleGoogleLoginSuccess = async (token: string) => {
       showMsg('กรุณาลงชื่อเข้าใช้ Google เพื่อซิงก์ข้อมูลรายงานคะแนน', 'error');
       return;
     }
-
-    setGoogleSyncing(true);
-    try {
-      const spreadsheetId = getCurrentSpreadsheetId();
-      
-      // Try to create the 'รายงานคะแนนสอบ' sheet tab (errors if already exists, which we catch and ignore)
-      try {
-        await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}:batchUpdate`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${googleAccessToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            requests: [
-              {
-                addSheet: {
-                  properties: {
-                    title: 'รายงานคะแนนสอบ'
-                  }
-                }
-              }
-            ]
-          })
-        });
-      } catch (err) {
-        // Ignored
-      }
-
-      // Clear existing content in 'รายงานคะแนนสอบ' A:K
-      const clearRange = 'รายงานคะแนนสอบ!A:K';
-      await fetch(`https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${googleAccessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      // Prepare data values
-      const values = [
-        [
-          'รหัสนักเรียน',
-          'ชื่อ-นามสกุล',
-          'ชั้นเรียน',
-          'เลขที่',
-          'ข้อสอบชุด',
-          'คะแนนปรนัย (MC)',
-          'คะแนนอัตนัย (SA)',
-          'คะแนนวิธีทำ (Written)',
-          'คะแนนรวมทั้งหมด',
-          'เวลาที่ส่ง (Thailand Time)',
-          'สถานะทุจริต'
-        ]
-      ];
-
-      submissions.forEach(s => {
-        let formattedTime = s.submittedAt;
-        try {
-          formattedTime = new Date(s.submittedAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-        } catch (_) {}
-
-        let saSum = 0;
-        if (s.shortAnswerScores) {
-          Object.values(s.shortAnswerScores).forEach(score => {
-            saSum += Number(score) || 0;
-          });
-        }
-
-        values.push([
-          s.studentId,
-          s.name,
-          `ม.${s.class}`,
-          s.number.toString(),
-          s.set,
-          s.multipleChoiceScore.toString(),
-          saSum.toString(),
-          s.writtenScore.toString(),
-          s.totalScore.toString(),
-          formattedTime,
-          s.cheated ? '⚠️ ทุจริต' : 'ปกติ'
-        ]);
-      });
-
-      const updateRange = 'รายงานคะแนนสอบ!A1';
-      const url = `https://sheets.googleapis.com/v1/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`;
-
-      const res = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${googleAccessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ values })
-      });
-
-      if (res.ok) {
-        showMsg('ซิงก์ข้อมูลรายงานผลสอบขึ้น Google Sheet แท็บ "รายงานคะแนนสอบ" สำเร็จ!', 'success');
-      } else {
-        const errorData = await res.json();
-        throw new Error(errorData.error?.message || 'Failed to update submissions sheet');
-      }
-    } catch (err: any) {
-      console.error('Submissions sheet sync error:', err);
-      showMsg(`ซิงก์ผลคะแนนล้มเหลว: ${err.message}`, 'error');
-    } finally {
-      setGoogleSyncing(false);
-    }
+    await handleBidirectionalSync();
   };
 
   // Delete submission
@@ -1375,7 +1253,7 @@ const handleGoogleLoginSuccess = async (token: string) => {
         
         {/* Alerts and messages banner */}
         {message.text && (
-          <div className={`p-4 rounded-xl text-xs font-semibold border ${
+          <div className={`p-4 rounded-xl text-xs font-semibold border whitespace-pre-line ${
             message.type === 'success' ? 'bg-green-50 text-green-800 border-green-200' :
             message.type === 'error' ? 'bg-red-50 text-red-800 border-red-200' :
             'bg-blue-50 text-blue-800 border-blue-200'
@@ -1493,7 +1371,7 @@ const handleGoogleLoginSuccess = async (token: string) => {
 
           {/* Card 2: Bidirectional Sync Engine */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
-            <div className="flex flex-col h-full justify-between">
+            <div className="flex flex-col h-full justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">
@@ -1504,14 +1382,85 @@ const handleGoogleLoginSuccess = async (token: string) => {
                     <p className="text-[11px] text-slate-500 mt-0.5">รวมและประสานข้อมูลให้ตรงกันระหว่างระบบเว็บและ Google Sheet</p>
                   </div>
                 </div>
-                
-                <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-[11px] text-amber-800 leading-relaxed mb-4">
-                  <strong>คำแนะนำการใช้งาน:</strong>
-                  <ul className="list-disc list-inside space-y-1 mt-1 text-[11px]">
-                    <li>การเพิ่ม/ลบข้อสอบหรือรายชื่อในเว็บ ระบบจะบันทึกแบบเรียลไทม์เสมอ</li>
-                    <li>หากท่านเข้าไปแก้ไข เพิ่ม หรือลบข้อมูลใน Google Sheet โดยตรง กรุณากดปุ่ม <strong>"เริ่มทำการซิงค์สองทางแบบสมบูรณ์"</strong> เพื่อนำข้อมูลจากชีตเข้ามาอัปเดตและเขียนทับให้ตรงกันเสมอ 100%</li>
-                  </ul>
-                </div>
+
+                {googleAccessToken ? (
+                  <div className="space-y-3.5 mb-4">
+                    {/* Active sheet display */}
+                    <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wider">Google Sheet ที่เชื่อมต่ออยู่:</span>
+                        {sheetUrl && (
+                          <a
+                            href={sheetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 underline transition-colors"
+                          >
+                            <span>เปิดในแท็บใหม่</span>
+                            <ExternalLink size={10} />
+                          </a>
+                        )}
+                      </div>
+                      <div className="text-xs font-mono text-slate-700 break-all bg-white/80 p-2 rounded border border-indigo-50/50 select-all">
+                        {sheetUrl || 'ไม่มีการระบุลิงก์'}
+                      </div>
+                    </div>
+
+                    {/* Change connected sheet URL */}
+                    <div className="space-y-1.5">
+                      <label htmlFor="custom-sheet-url-input" className="text-[10px] font-bold text-slate-600">
+                        เปลี่ยนเป็น Google Sheet อื่น (วางลิงก์ชีตของคุณที่นี่):
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          id="custom-sheet-url-input"
+                          type="text"
+                          value={inputSheetUrl}
+                          onChange={(e) => setInputSheetUrl(e.target.value)}
+                          placeholder="https://docs.google.com/spreadsheets/d/..."
+                          className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 bg-slate-50 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleManualConnectSheet}
+                          disabled={googleSyncing}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-sm"
+                        >
+                          <Save size={13} />
+                          <span>เชื่อมต่อ</span>
+                        </button>
+                      </div>
+                      <p className="text-[9px] text-slate-400 leading-normal">
+                        *หากเปลี่ยนลิงก์ ระบบจะทดสอบสิทธิ์เข้าถึง และซิงก์ดึงข้อมูลจากชีตใหม่มาเชื่อมโยงกันทันที
+                      </p>
+                    </div>
+
+                    {/* Auto-create new sheet helper */}
+                    <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200/60">
+                      <div className="text-left">
+                        <h4 className="text-[10px] font-bold text-slate-700">ต้องการให้ระบบสร้างและเชื่อมต่อชีตใหม่ให้ทันที?</h4>
+                        <p className="text-[9px] text-slate-500">ระบบจะสร้างไฟล์ชีตใน Google Drive ของคุณพร้อมเตรียมโครงสร้างชีตเปล่าให้เลย</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleForceCreateNewSheet}
+                        disabled={googleSyncing}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold text-[10px] rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-sm self-start sm:self-center shrink-0"
+                      >
+                        <Plus size={12} />
+                        <span>✨ สร้างชีตใหม่เลย</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-[11px] text-amber-800 leading-relaxed mb-4">
+                    <strong>คำแนะนำการใช้งาน:</strong>
+                    <ul className="list-disc list-inside space-y-1 mt-1 text-[11px]">
+                      <li>การเพิ่ม/ลบข้อสอบหรือรายชื่อในเว็บ ระบบจะบันทึกแบบเรียลไทม์เสมอ</li>
+                      <li>หากท่านเข้าไปแก้ไข เพิ่ม หรือลบข้อมูลใน Google Sheet โดยตรง กรุณากดปุ่ม <strong>"เริ่มทำการซิงค์สองทางแบบสมบูรณ์"</strong> เพื่อนำข้อมูลจากชีตเข้ามาอัปเดตและเขียนทับให้ตรงกันเสมอ 100%</li>
+                    </ul>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1683,13 +1632,13 @@ const handleGoogleLoginSuccess = async (token: string) => {
                             </span>
                           </td>
                           <td className="py-3 px-4 text-center font-bold text-slate-700">
-                            {(sub.cheated && !sub.graded) ? <span className="text-red-500">0</span> : sub.multipleChoiceScore}
+                            {sub.multipleChoiceScore}
                           </td>
                           <td className="py-3 px-4 text-center text-slate-500">{saScore}</td>
                           <td className="py-3 px-4 text-center text-slate-500">{sub.writtenScore}</td>
                           <td className="py-3 px-4 text-center">
                             <span className="bg-blue-100 text-blue-900 font-bold px-2.5 py-1 rounded">
-                              {(sub.cheated && !sub.graded) ? 0 : sub.totalScore} / 30
+                              {sub.totalScore} / 30
                             </span>
                           </td>
                           <td className="py-3 px-4 text-center">
@@ -2666,11 +2615,11 @@ const handleGoogleLoginSuccess = async (token: string) => {
               <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200 flex justify-between">
                   <span>ส่วนที่ 1: ตรวจคะแนนปรนัยเลือกตอบ (15 ข้อ)</span>
-                  <span className="text-[#002B49]">ประเมินแล้ว: {gradingForm.cheated ? 0 : gradingSubmission.multipleChoiceScore} / 15 คะแนน</span>
+                  <span className="text-[#002B49]">ประเมินแล้ว: {gradingSubmission.multipleChoiceScore} / 15 คะแนน</span>
                 </div>
                 <div className="p-4 bg-slate-50 space-y-4">
                   <p className="text-[11px] text-slate-500 font-medium">
-                    * ตรวจคะแนนปรนัยแบบเรียลไทม์ {gradingForm.cheated ? '(ทุจริตเป็น 0 คะแนน)' : `นักเรียนทำถูกต้อง ${gradingSubmission.multipleChoiceScore} ข้อ`} (คุณครูสามารถคลิกแก้ไขคำตอบเพื่อช่วยเหลือนักเรียนได้)
+                    * ตรวจคะแนนปรนัยแบบเรียลไทม์ นักเรียนทำถูกต้อง {gradingSubmission.multipleChoiceScore} ข้อ (คุณครูสามารถคลิกแก้ไขคำตอบเพื่อช่วยเหลือนักเรียนได้)
                   </p>
                   
                   <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3">
@@ -2753,7 +2702,7 @@ const handleGoogleLoginSuccess = async (token: string) => {
                       const originalAns = gradingSubmission.originalShortAnswers?.[q.id] || gradingSubmission.shortAnswers[q.id] || '';
                       const currentAns = gradingForm.editedShortAnswers?.[q.id] || '';
                       const isExactlyCorrect = currentAns.trim() === q.correctAnswer.trim();
-                      const currentScore = gradingForm.shortAnswerScores[q.id] || 0;
+                      const currentScore = gradingForm.shortAnswerScores[q.id];
 
                       return (
                         <div key={q.id} className="pt-3 first:pt-0 flex flex-col md:flex-row justify-between gap-4 font-medium">
@@ -2851,11 +2800,29 @@ const handleGoogleLoginSuccess = async (token: string) => {
                   {/* Base64 canvas render */}
                   <div className="bg-slate-100 border rounded-lg p-4 flex flex-col items-center justify-center">
                     {gradingSubmission.writtenAnswer ? (
-                      <img
-                        src={gradingSubmission.writtenAnswer}
-                        alt="กระดาษทดแสดงวิธีทำของนักเรียน"
-                        className="max-h-64 object-contain border-2 bg-white rounded shadow-sm"
-                      />
+                      <div className="flex flex-col items-center gap-2 w-full">
+                        <img
+                          src={gradingSubmission.writtenAnswer}
+                          referrerPolicy="no-referrer"
+                          alt="กระดาษทดแสดงวิธีทำของนักเรียน"
+                          className="max-h-96 w-full object-contain border-2 bg-white rounded shadow-sm"
+                          onError={(e) => {
+                            const url = gradingSubmission.writtenAnswer;
+                            const matches = url.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+                            if (matches && matches[1]) {
+                              e.currentTarget.src = `https://drive.google.com/thumbnail?id=${matches[1]}&sz=w1000`;
+                            }
+                          }}
+                        />
+                        <a
+                          href={gradingSubmission.writtenAnswer}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:underline font-bold mt-1 flex items-center gap-1"
+                        >
+                          🔗 เปิดดูรูปภาพแสดงวิธีทำจาก Google Drive (หากรูปภาพด้านบนไม่ยอมแสดง)
+                        </a>
+                      </div>
                     ) : (
                       <p className="text-slate-400 italic font-medium py-6">ไม่มีข้อมูลกระดาษวาดภาพตอบของนักเรียน</p>
                     )}

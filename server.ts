@@ -9,7 +9,7 @@ import { Student, Question, Submission, SystemState } from "./src/types";
 import http from "http";
 import https from "https";
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), "db.json");
 const TARGET_DRIVE_FOLDER_ID = "1EbKMnX8twSAStZxjJXidlv_1D5G5u6GR";
 
@@ -139,6 +139,12 @@ function readDb(): SystemState {
           '6/8': 'closed'
         };
       }
+      if (!data.spreadsheetId) {
+        data.spreadsheetId = "1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U";
+      }
+      if (!data.rosterSheetUrl) {
+        data.rosterSheetUrl = "https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0";
+      }
 
       // Migration check: Ensure '6/8' questions exist separately
       const has6_8 = data.questions.some((q: any) => q.gradeLevel === '6/8');
@@ -178,7 +184,9 @@ function readDb(): SystemState {
       '5': 'closed',
       '6': 'closed',
       '6/8': 'closed'
-    }
+    },
+    spreadsheetId: "1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U",
+    rosterSheetUrl: "https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0"
   };
   cachedDbState = state;
   writeDb(state);
@@ -254,78 +262,77 @@ async function uploadToGoogleDrive(token: string, folderId: string, filename: st
   }
 }
 
+function parseGoogleError(status: number, statusText: string, bodyText: string): string {
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed.error && parsed.error.message) {
+      const msg = parsed.error.message;
+      if (msg.includes("API has not been used") || msg.includes("disabled") || msg.includes("not enabled")) {
+        return `Google API ยังไม่ได้ถูกเปิดใช้งานในโปรเจกต์ของคุณ 
+
+วิธีแก้ไข:
+1. ไปที่ Google Cloud Console ลิงก์นี้: https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=math-d44db
+2. กดปุ่ม "เปิดใช้งาน" (Enable) เพื่อเปิดใช้ Google Sheets API
+3. ไปที่ลิงก์นี้: https://console.cloud.google.com/apis/library/drive.googleapis.com?project=math-d44db
+4. กดปุ่ม "เปิดใช้งาน" (Enable) เพื่อเปิดใช้ Google Drive API
+5. รอ 1-2 นาที แล้วกลับมากดเชื่อมต่อหรือสร้างชีตใหม่อีกครั้ง`;
+      }
+      if (status === 403 || msg.includes("insufficient") || msg.includes("scope")) {
+        return `สิทธิ์การเข้าถึง Google Sheets/Drive ไม่เพียงพอ
+
+วิธีแก้ไข:
+1. กด "ยกเลิกเชื่อมต่อ" เพื่อล้างเซสชันเดิม
+2. กดเชื่อมต่อระบบ Google Workspace อีกครั้ง
+3. เมื่อหน้าต่างลงชื่อเข้าใช้ของ Google เด้งขึ้นมา ให้กรอกรหัสผ่านเข้าสู่ระบบ และในหน้าจอถัดไป **"ต้องติ๊กถูกเลือกรับสิทธิ์เข้าถึง ดู แก้ไข สร้าง และลบสเปรดชีต Google"** เสมอ หากไม่ติ๊กเลือกปุ่มเหล่านั้น Google จะไม่อนุมัติการสร้างหรือเขียนชีตครับ`;
+      }
+      return msg;
+    }
+  } catch (_) {}
+  
+  if (status === 403) {
+    return `สิทธิ์การเข้าถึงไม่เพียงพอ (403 Forbidden) กรุณายกเลิกเชื่อมต่อแล้วกดเชื่อมต่อใหม่ โดยต้องติ๊กเลือกทุกช่องสิทธิ์เข้าถึง Google Sheets/Drive ในขั้นตอนลงชื่อเข้าใช้`;
+  }
+  return `${statusText || 'Error'} (โค้ด: ${status}) - ${bodyText}`;
+}
+
 // --- GOOGLE SHEETS INTEGRATION HELPERS ---
 
-// 💡 เปลี่ยนฟังก์ชัน Push ให้แยกส่งข้อมูลไปตามสเปรดชีตที่ถูกต้อง
-async function pushAllToGoogleSheets(accessToken: string, studentSpreadsheetId: string, mainSpreadsheetId: string, state: SystemState) {
-  const urlMain = `https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchUpdate`;
-  const urlStudent = `https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values:batchUpdate`;
-
-  // 1. จัดการชีตรายชื่อนักเรียน (สเปรดชีตตัวแรก)
-  const studentRows = [["ID", "Name", "Classroom", "Number", "Password"]];
-  state.students.forEach(s => studentRows.push([s.id, s.name, s.classroom, s.number || "", s.password || s.id]));
-
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values:batchClear`, {
-    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ranges: ["Students!A:E"] })
-  });
-  await fetch(urlStudent, {
-    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: [{ range: "Students!A:E", values: studentRows }] })
-  });
-
-  // 2. จัดการชีตข้อสอบและผลการสอบ (สเปรดชีตตัวที่สอง)
-  const questionRows = [["ID", "Code", "Level", "Type", "Choices", "Question", "Answer", "Solution", "Image"]];
-  state.questions.forEach(q => questionRows.push([q.id, q.code, q.level, q.type, JSON.stringify(q.choices), q.question, q.answer, q.solution || "", q.image || ""]));
-
-  const submissionRows = [["ID", "StudentID", "StudentName", "Classroom", "Score", "TotalQuestions", "SubmittedAt", "Answers", "CheatingAttempts", "TabSwitches", "FaceOuts", "IsCheater", "Logs", "WrittenAnswers"]];
-  state.submissions.forEach(s => submissionRows.push([s.id, s.studentId, s.studentName, s.classroom, String(s.score), String(s.totalQuestions), s.submittedAt, JSON.stringify(s.answers), String(s.cheatingAttempts || 0), String(s.tabSwitches || 0), String(s.faceOuts || 0), String(s.isCheater || false), JSON.stringify(s.logs || []), JSON.stringify(s.writtenAnswers || {})]));
-
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchClear`, {
-    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ranges: ["Questions!A:I", "Submissions!A:N"] })
-  });
-  await fetch(urlMain, {
-    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: [{ range: "Questions!A:I", values: questionRows }, { range: "Submissions!A:N", values: submissionRows }] })
-  });
-}
-
-// 💡 เปลี่ยนฟังก์ชัน Pull ให้ดึงรายชื่อจากชีต 1 และดึงข้อสอบ/คะแนนจากชีต 2
-async function pullAllFromGoogleSheets(accessToken: string, studentSpreadsheetId: string, mainSpreadsheetId: string) {
-  const state = readDb();
-
-  // ดึงรายชื่อนักเรียนจากสเปรดชีต 1
-  const resStudent = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${studentSpreadsheetId}/values/Students!A:E`, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (resStudent.ok) {
-    const dataStudent = await resStudent.json();
-    if (dataStudent.values && dataStudent.values.length > 1) {
-      state.students = dataStudent.values.slice(1).map((row: any) => ({ id: row[0]||"", name: row[1]||"", classroom: row[2]||"", number: row[3]||"", password: row[4]||"" }));
-    }
-  }
-
-  // ดึงข้อสอบและผลการสอบจากสเปรดชีต 2
-  const resMain = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${mainSpreadsheetId}/values:batchGet?ranges=Questions!A:I&ranges=Submissions!A:N`, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (resMain.ok) {
-    const dataMain = await resMain.json();
-    const valueRanges = dataMain.valueRanges || [];
-    
-    if (valueRanges[0]?.values?.length > 1) {
-      state.questions = valueRanges[0].values.slice(1).map((row: any) => {
-        let choices = ["", "", "", "", ""];
-        try { choices = JSON.parse(row[4]); } catch { if (row[4]) choices = row[4].split(","); }
-        return { id: row[0]||"", code: row[1]||"", level: row[2]||"", type: row[3]||"multiple-choice", question: row[5]||"", choices, answer: row[6]||"0", solution: row[7]||"", image: row[8]||"" };
+async function pushAllToGoogleSheets(token: string, spreadsheetId: string, state: SystemState) {
+  try {
+    // Clear existing contents in the tabs first to prevent trailing old rows
+    try {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          ranges: ["Questions!A:Z", "Students!A:Z", "Submissions!A:Z"]
+        })
       });
+    } catch (clearErr) {
+      console.error("Error clearing spreadsheet ranges:", clearErr);
     }
-    if (valueRanges[1]?.values?.length > 1) {
-      state.submissions = valueRanges[1].values.slice(1).map((row: any) => ({ id: row[0]||"", studentId: row[1]||"", studentName: row[2]||"", classroom: row[3]||"", score: Number(row[4]||0), totalQuestions: Number(row[5]||0), submittedAt: row[6]||"", answers: row[7]?JSON.parse(row[7]):{}, cheatingAttempts: Number(row[8]||0), tabSwitches: Number(row[9]||0), faceOuts: Number(row[10]||0), isCheater: row[11]==='true', logs: row[12]?JSON.parse(row[12]):[], writtenAnswers: row[13]?JSON.parse(row[13]):{} }));
-    }
-  }
 
-  writeDb(state);
-  return state;
-}
-    
+    // 1. Push Questions
+    const questionHeaders = ["ID", "GradeLevel", "Set", "Type", "QuestionNumber", "Text", "Image", "Choices", "ChoiceImages", "CorrectAnswer"];
+    const questionRows = [questionHeaders];
+    state.questions.forEach(q => {
+      questionRows.push([
+        q.id,
+        q.gradeLevel,
+        q.set,
+        q.type,
+        q.questionNumber.toString(),
+        q.text,
+        q.image || "",
+        q.choices ? JSON.stringify(q.choices) : "",
+        q.choiceImages ? JSON.stringify(q.choiceImages) : "",
+        q.correctAnswer
+      ]);
+    });
+
     // 2. Push Students
     const studentHeaders = ["ID", "Name", "Class", "Number"];
     const studentRows = [studentHeaders];
@@ -407,7 +414,7 @@ async function pullAllFromGoogleSheets(accessToken: string, studentSpreadsheetId
     } else {
       console.log("Successfully synchronized all data to Google Sheets in background!");
     }
-   catch (err) {
+  } catch (err) {
     console.error("Error pushing data to Google Sheets:", err);
   }
 }
@@ -455,7 +462,8 @@ async function createMathExamSpreadsheet(token: string, state: SystemState): Pro
 
     if (!createRes.ok) {
       const errText = await createRes.text();
-      throw new Error(`Failed to create spreadsheet: ${createRes.statusText} - ${errText}`);
+      const friendlyMessage = parseGoogleError(createRes.status, createRes.statusText, errText);
+      throw new Error(friendlyMessage);
     }
 
     const data: any = await createRes.json();
@@ -735,7 +743,7 @@ async function startServer() {
     if (student) {
       // Check exam status
       let gradeLevel: '3' | '5' | '6' | '6/8' = '3';
-      const cStr = student.class.trim();
+      const cStr = student.class.trim().replace(/^ม\./, "");
       if (cStr.startsWith("3/")) gradeLevel = '3';
       else if (cStr.startsWith("5/")) gradeLevel = '5';
       else if (cStr === "6/8") gradeLevel = '6/8';
@@ -778,7 +786,7 @@ async function startServer() {
     // 6/3, 6/5 -> Grade 6
     // 6/8 -> Grade 6/8 (Separate subject code)
     let gradeLevel: '3' | '5' | '6' | '6/8' = '3';
-    const cStr = (className as string).trim();
+    const cStr = (className as string).trim().replace(/^ม\./, "");
     if (cStr.startsWith("3/")) gradeLevel = '3';
     else if (cStr.startsWith("5/")) gradeLevel = '5';
     else if (cStr === "6/8") gradeLevel = '6/8';
@@ -842,13 +850,13 @@ async function startServer() {
     });
 
     const isCheated = cheatingWarningsCount >= 3;
-    const finalMcScore = isCheated ? 0 : mcScore;
+    const finalMcScore = mcScore; // Keeping actual MC score even if warnings are high; admin has grading discretion
 
-    // 3. Initialize short answer scores to 0 (admin will grade these later)
+    // 3. Initialize short answer scores to null (admin will grade these as 0, 1, or 2 later)
     const shortAnswerScores: Record<string, number> = {};
     const saQuestions = targetQuestions.filter(q => q.type === 'short-answer');
     saQuestions.forEach(q => {
-      shortAnswerScores[q.id] = 0; // default to 0
+      shortAnswerScores[q.id] = null as any; // default to null (ungraded)
     });
 
     // 4. Process Written Answer (drawing canvas base64) to Google Drive or Local uploads
@@ -864,8 +872,9 @@ async function startServer() {
         if (token) {
           console.log(`Uploading student written answer for ID ${studentId} to Google Drive...`);
           // Try to upload to targeted drive folder
-          driveUrl = await uploadToGoogleDrive(token, TARGET_DRIVE_FOLDER_ID, filename, mimeType, base64Data);
-          if (!driveUrl) {
+          const targetFolderId = state.driveFolderId || TARGET_DRIVE_FOLDER_ID;
+          driveUrl = await uploadToGoogleDrive(token, targetFolderId, filename, mimeType, base64Data);
+          if (!driveUrl && targetFolderId !== "root") {
             console.log("Failed uploading to specified folder, trying root folder...");
             driveUrl = await uploadToGoogleDrive(token, "root", filename, mimeType, base64Data);
           }
@@ -1133,23 +1142,46 @@ async function startServer() {
   });
 
   // ADMIN API: Add/edit question (supports batch)
-  app.post("/api/admin/questions", async (req, res) => {
-    try {
-      const q = req.body as Question;
-      const state = readDb();
-      if (!q.id) q.id = "q_" + Date.now();
-      const idx = state.questions.findIndex(x => x.id === q.id);
-      if (idx >= 0) state.questions[idx] = q; else state.questions.push(q);
-      writeDb(state);
+  app.post("/api/admin/questions", (req, res) => {
+    const { question, questions, deleteId } = req.body;
+    const state = readDb();
 
-      // 💡 ส่งข้อมูลข้อสอบชุดใหม่ขึ้น Google Sheets ทันทีอัตโนมัติ
-      if (state.googleAccessToken && state.spreadsheetId) {
-        const studentId = (state as any).studentSpreadsheetId || "1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods";
-        await pushAllToGoogleSheets(state.googleAccessToken, studentId, state.spreadsheetId, state).catch(console.error);
+    if (questions && Array.isArray(questions)) {
+      for (const q of questions) {
+        if (!q || !q.id) continue;
+        const idx = state.questions.findIndex(item => item.id === q.id);
+        if (idx > -1) {
+          state.questions[idx] = q;
+        } else {
+          state.questions.push(q);
+        }
       }
 
-      res.json({ success: true, question: q });
-    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+      if (deleteId) {
+        state.questions = state.questions.filter(item => item.id !== deleteId);
+      }
+
+      writeDb(state);
+      return res.json({ success: true, count: questions.length });
+    }
+
+    if (!question || !question.id) {
+      return res.status(400).json({ success: false, message: "ข้อมูลข้อสอบไม่ถูกต้อง" });
+    }
+
+    const idx = state.questions.findIndex(q => q.id === question.id);
+    if (idx > -1) {
+      state.questions[idx] = question;
+    } else {
+      state.questions.push(question);
+    }
+
+    if (deleteId) {
+      state.questions = state.questions.filter(item => item.id !== deleteId);
+    }
+
+    writeDb(state);
+    res.json({ success: true, question });
   });
 
   // ADMIN API: Delete all questions
@@ -1187,31 +1219,10 @@ async function startServer() {
     writeDb(state);
     res.json({ success: true, count: initialLen - state.questions.length, message: "ลบข้อสอบที่เลือกสำเร็จ" });
   });
-app.post("/api/admin/google-sheets/connect", async (req, res) => {
-    const { accessToken, spreadsheetId, studentSpreadsheetId } = req.body;
-    const state = readDb();
-    state.googleAccessToken = accessToken;
-    state.spreadsheetId = spreadsheetId;
-    (state as any).studentSpreadsheetId = studentSpreadsheetId;
-    try {
-      await pushAllToGoogleSheets(accessToken, studentSpreadsheetId, spreadsheetId, state);
-      writeDb(state);
-      res.json({ success: true, examStatus: state.examStatus });
-    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
-  });
 
-app.post("/api/admin/google-sheets/pull", async (req, res) => {
-    const state = readDb();
-    if (!state.googleAccessToken || !state.spreadsheetId) return res.status(400).json({ success: false, message: "ไม่ได้เชื่อมต่อชีต" });
-    try {
-      const studentId = (state as any).studentSpreadsheetId || "1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods";
-      const updated = await pullAllFromGoogleSheets(state.googleAccessToken, studentId, state.spreadsheetId);
-      res.json({ success: true, data: updated });
-    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
-  });
   // ADMIN API: Connect or pull Google Sheets
   app.post("/api/admin/google-sheets/connect", async (req, res) => {
-    const { accessToken } = req.body;
+    const { accessToken, spreadsheetUrl, driveFolderId, forceCreate } = req.body;
     if (!accessToken) {
       return res.status(400).json({ success: false, message: "กรุณาระบุ access token" });
     }
@@ -1219,47 +1230,154 @@ app.post("/api/admin/google-sheets/pull", async (req, res) => {
     try {
       const state = readDb();
       state.googleAccessToken = accessToken;
+      if (driveFolderId) {
+        state.driveFolderId = driveFolderId;
+      }
       
-      // Look for existing spreadsheet
-      console.log("Searching for 'ระบบทำข้อสอบคณิตศาสตร์ (Math Exam System)' spreadsheet...");
-      let spreadsheetId = await findMathExamSpreadsheet(accessToken);
+      let spreadsheetId: string | null = null;
+      let accessible = false;
+
+      if (forceCreate) {
+        console.log("Forcing creation of a brand new spreadsheet...");
+        try {
+          spreadsheetId = await createMathExamSpreadsheet(accessToken, state);
+          accessible = true;
+        } catch (createErr: any) {
+          console.error("Failed to force create spreadsheet:", createErr);
+          return res.status(500).json({ success: false, message: createErr.message || "ไม่สามารถสร้าง Google Sheet ใหม่ได้" });
+        }
+      } else {
+        // Determine the spreadsheet ID to connect
+        if (spreadsheetUrl) {
+          const matches = spreadsheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+          if (matches && matches[1]) {
+            spreadsheetId = matches[1];
+          } else if (!spreadsheetUrl.includes("/") && spreadsheetUrl.length > 15) {
+            spreadsheetId = spreadsheetUrl; // direct ID
+          }
+        }
+        
+        if (!spreadsheetId) {
+          // Fallback to existing, pre-configured fallback, or find by name
+          if (state.spreadsheetId) {
+            spreadsheetId = state.spreadsheetId;
+          } else {
+            spreadsheetId = "1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U";
+          }
+        }
+
+        // Check if this spreadsheet actually exists and is accessible by this token
+        if (spreadsheetId) {
+          try {
+            const testRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
+              headers: { "Authorization": `Bearer ${accessToken}` }
+            });
+            if (testRes.ok) {
+              accessible = true;
+            } else {
+              const errText = await testRes.text();
+              console.warn(`Spreadsheet ${spreadsheetId} is not accessible. Status: ${testRes.status}. Error: ${errText}`);
+              if (spreadsheetUrl) {
+                const friendlyMessage = parseGoogleError(testRes.status, testRes.statusText, errText);
+                return res.status(400).json({ success: false, message: `ไม่สามารถเชื่อมต่อกับชีตตามลิงก์ที่ระบุได้:\n${friendlyMessage}` });
+              }
+            }
+          } catch (err: any) {
+            console.error("Error testing spreadsheet accessibility:", err);
+            if (spreadsheetUrl) {
+              return res.status(400).json({ success: false, message: `เกิดข้อผิดพลาดในการเชื่อมต่อกับชีต: ${err.message}` });
+            }
+          }
+        }
+
+        if (!accessible) {
+          console.log("Spreadsheet not accessible. Attempting to search for existing 'ระบบทำข้อสอบคณิตศาสตร์ (Math Exam System)' spreadsheet...");
+          const foundId = await findMathExamSpreadsheet(accessToken);
+          if (foundId) {
+            console.log(`Found existing spreadsheet in user's drive with ID: ${foundId}`);
+            spreadsheetId = foundId;
+            accessible = true;
+          } else {
+            console.log("No existing spreadsheet found. Creating a new one...");
+            try {
+              spreadsheetId = await createMathExamSpreadsheet(accessToken, state);
+              accessible = true;
+            } catch (createErr: any) {
+              console.error("Failed to create spreadsheet:", createErr);
+              return res.status(500).json({ success: false, message: `ไม่สามารถสร้างหรือเข้าถึง Google Sheet ได้:\n${createErr.message || createErr}` });
+            }
+          }
+        }
+      }
 
       if (spreadsheetId) {
-        console.log(`Found existing spreadsheet ID: ${spreadsheetId}`);
+        console.log(`Using spreadsheet ID: ${spreadsheetId}`);
         state.spreadsheetId = spreadsheetId;
         
         // Ensure all required sheets/tabs exist
         await ensureSpreadsheetTabs(accessToken, spreadsheetId);
         
-        // Pull data and intelligently merge/adopt
-        console.log("Pulling and merging data from existing Google Spreadsheet...");
+        // Pull data and merge with local data to avoid overwriting or data loss
+        console.log("Pulling and syncing data from Google Spreadsheet...");
         const pulled = await pullAllFromGoogleSheets(accessToken, spreadsheetId);
         let needsPush = false;
 
+        // Merge questions: keep local ones if they don't exist in sheet, and let sheet be authoritative for existing ones
         if (pulled.questions && pulled.questions.length > 0) {
-          state.questions = pulled.questions;
+          const mergedQs = [...state.questions];
+          pulled.questions.forEach(pq => {
+            const idx = mergedQs.findIndex(q => q.id === pq.id);
+            if (idx === -1) {
+              mergedQs.push(pq);
+            } else {
+              mergedQs[idx] = pq;
+            }
+          });
+          state.questions = mergedQs;
+          needsPush = true;
         } else if (state.questions.length > 0) {
           needsPush = true;
         }
 
+        // Merge students to avoid losing any local additions
         if (pulled.students && pulled.students.length > 0) {
-          state.students = pulled.students;
+          const mergedStudents = [...state.students];
+          pulled.students.forEach(ps => {
+            if (!mergedStudents.some(s => s.id === ps.id)) {
+              mergedStudents.push(ps);
+            }
+          });
+          state.students = mergedStudents;
+          needsPush = true;
         } else if (state.students.length > 0) {
           needsPush = true;
         }
 
+        // Merge submissions instead of blind overwrite to protect any local student submissions
         if (pulled.submissions && pulled.submissions.length > 0) {
-          state.submissions = pulled.submissions;
+          const mergedSubmissions = [...state.submissions];
+          pulled.submissions.forEach(ps => {
+            const idx = mergedSubmissions.findIndex(s => s.id === ps.id);
+            if (idx > -1) {
+              if (ps.graded && !mergedSubmissions[idx].graded) {
+                mergedSubmissions[idx] = ps;
+              }
+            } else {
+              mergedSubmissions.push(ps);
+            }
+          });
+          state.submissions = mergedSubmissions;
+          needsPush = true;
         } else if (state.submissions.length > 0) {
           needsPush = true;
         }
 
         if (needsPush) {
-          console.log("Pushing local data to newly-mapped spreadsheet worksheets...");
+          console.log("Pushing merged data to spreadsheet worksheets...");
           await pushAllToGoogleSheets(accessToken, spreadsheetId, state);
         }
       } else {
-        console.log("No spreadsheet found. Creating a brand new one...");
+        console.log("No spreadsheet found or specified. Creating a brand new one...");
         spreadsheetId = await createMathExamSpreadsheet(accessToken, state);
         state.spreadsheetId = spreadsheetId;
       }
@@ -1294,36 +1412,112 @@ app.post("/api/admin/google-sheets/pull", async (req, res) => {
 
   // ADMIN API: Bidirectional sync with Google Sheets
   app.post("/api/admin/google-sheets/sync", async (req, res) => {
+    const { accessToken, spreadsheetId } = req.body;
     const state = readDb();
-    const token = state.googleAccessToken;
-    const sheetId = state.spreadsheetId;
+    
+    if (accessToken) {
+      state.googleAccessToken = accessToken;
+    }
+    if (spreadsheetId) {
+      state.spreadsheetId = spreadsheetId;
+    }
+    writeDb(state);
 
-    if (!token || !sheetId) {
+    const token = state.googleAccessToken;
+    let sheetId = state.spreadsheetId;
+
+    if (!token) {
       return res.status(400).json({ success: false, message: "กรุณาเชื่อมต่อบัญชี Google ก่อนซิงก์" });
     }
 
     try {
       console.log("Starting manual bidirectional sync with Google Sheets...");
       
+      // Check if this spreadsheet actually exists and is accessible by this token
+      let accessible = false;
+      if (sheetId) {
+        try {
+          const testRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}`, {
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (testRes.ok) {
+            accessible = true;
+          } else {
+            console.warn(`Spreadsheet ${sheetId} is not accessible during sync. Status: ${testRes.status}.`);
+          }
+        } catch (err) {
+          console.error("Error testing spreadsheet accessibility during sync:", err);
+        }
+      }
+
+      if (!accessible) {
+        console.log("Spreadsheet not accessible during sync. Attempting to search for existing 'ระบบทำข้อสอบคณิตศาสตร์ (Math Exam System)' spreadsheet...");
+        const foundId = await findMathExamSpreadsheet(token);
+        if (foundId) {
+          console.log(`Found existing spreadsheet in user's drive with ID: ${foundId}`);
+          sheetId = foundId;
+          state.spreadsheetId = foundId;
+          writeDb(state);
+          accessible = true;
+        } else {
+          console.log("No existing spreadsheet found. Creating a new one...");
+          try {
+            sheetId = await createMathExamSpreadsheet(token, state);
+            state.spreadsheetId = sheetId;
+            writeDb(state);
+            accessible = true;
+          } catch (createErr) {
+            console.error("Failed to create spreadsheet during sync:", createErr);
+            return res.status(500).json({ success: false, message: "ไม่สามารถสร้างหรือเข้าถึง Google Sheet ได้" });
+          }
+        }
+      }
+
       // Ensure tabs exist
       await ensureSpreadsheetTabs(token, sheetId);
 
       // Pull worksheets from Google Sheet
       const pulled = await pullAllFromGoogleSheets(token, sheetId);
       
-      // Synchronize questions
+      // Synchronize questions with merging
       if (pulled.questions && pulled.questions.length > 0) {
-        state.questions = pulled.questions;
+        const mergedQs = [...state.questions];
+        pulled.questions.forEach(pq => {
+          const idx = mergedQs.findIndex(q => q.id === pq.id);
+          if (idx === -1) {
+            mergedQs.push(pq);
+          } else {
+            mergedQs[idx] = pq;
+          }
+        });
+        state.questions = mergedQs;
       }
       
-      // Synchronize students
+      // Synchronize students with merging
       if (pulled.students && pulled.students.length > 0) {
-        state.students = pulled.students;
+        const mergedStudents = [...state.students];
+        pulled.students.forEach(ps => {
+          if (!mergedStudents.some(s => s.id === ps.id)) {
+            mergedStudents.push(ps);
+          }
+        });
+        state.students = mergedStudents;
       }
 
-      // Synchronize submissions
+      // Synchronize submissions with merging
       if (pulled.submissions && pulled.submissions.length > 0) {
-        state.submissions = pulled.submissions;
+        const mergedSubmissions = [...state.submissions];
+        pulled.submissions.forEach(ps => {
+          const idx = mergedSubmissions.findIndex(s => s.id === ps.id);
+          if (idx > -1) {
+            if (ps.graded && !mergedSubmissions[idx].graded) {
+              mergedSubmissions[idx] = ps;
+            }
+          } else {
+            mergedSubmissions.push(ps);
+          }
+        });
+        state.submissions = mergedSubmissions;
       }
 
       // Save local DB

@@ -69,21 +69,20 @@ export default function SubmissionSummary({ submission, onDone }: SubmissionSumm
               </div>
 
               <div className="my-6 text-center">
-                {submission.cheated && !submission.graded ? (
-                  <div className="inline-block bg-red-50 text-red-700 px-4 py-2 rounded-lg border border-red-200 text-xs font-bold">
-                    ⚠️ ถือเป็นโมฆะ (ตรวจพบทุจริต)
-                  </div>
-                ) : (
-                  <div>
-                    <span className="text-5xl font-black text-[#002B49]">{submission.multipleChoiceScore}</span>
-                    <span className="text-lg text-slate-400 font-bold"> / 15 คะแนน</span>
+                <div>
+                  <span className="text-5xl font-black text-[#002B49]">{submission.multipleChoiceScore}</span>
+                  <span className="text-lg text-slate-400 font-bold"> / 15 คะแนน</span>
+                </div>
+                {submission.cheated && !submission.graded && (
+                  <div className="inline-block mt-3 bg-red-50 text-red-700 px-3 py-1 rounded-md border border-red-200 text-[10px] font-bold">
+                    ⚠️ ตรวจพบพฤติกรรมสลับหน้าต่าง (รอตรวจความถูกต้อง)
                   </div>
                 )}
               </div>
 
               <div className="bg-blue-50/50 p-3 rounded-lg text-center text-xs font-semibold text-blue-900 border border-blue-100/50">
                 {submission.cheated && !submission.graded 
-                  ? 'ทุจริตการสอบ (ฝ่าฝืนคำแจ้งเตือนสลับหน้าจอ)' 
+                  ? `พบการสลับหน้าจอสอบ ${submission.cheatingWarningsCount} ครั้ง อยู่ระหว่างดุลยพินิจของคุณครู` 
                   : `ทำถูกต้องคิดเป็น ${Math.round((submission.multipleChoiceScore / 15) * 100)}% ของข้อสอบทั้งหมด`
                 }
               </div>
@@ -187,12 +186,28 @@ export default function SubmissionSummary({ submission, onDone }: SubmissionSumm
             </div>
             <div className="p-6 bg-slate-50 flex flex-col items-center justify-center">
               {submission.writtenAnswer ? (
-                <div className="bg-white border-2 border-dashed border-slate-300 rounded-lg p-2 max-w-lg w-full shadow-inner overflow-hidden">
+                <div className="bg-white border-2 border-dashed border-slate-300 rounded-lg p-2 max-w-lg w-full shadow-inner overflow-hidden flex flex-col items-center gap-2">
                   <img 
                     src={submission.writtenAnswer} 
+                    referrerPolicy="no-referrer"
                     alt="กระดาษทดแสดงวิธีทำ" 
-                    className="w-full h-auto object-contain block max-h-64"
+                    className="w-full h-auto object-contain block max-h-96"
+                    onError={(e) => {
+                      const url = submission.writtenAnswer;
+                      const matches = url.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+                      if (matches && matches[1]) {
+                        e.currentTarget.src = `https://drive.google.com/thumbnail?id=${matches[1]}&sz=w1000`;
+                      }
+                    }}
                   />
+                  <a
+                    href={submission.writtenAnswer}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline font-bold mt-1 flex items-center gap-1"
+                  >
+                    🔗 เปิดดูรูปภาพแสดงวิธีทำจาก Google Drive (หากรูปภาพด้านบนไม่ยอมแสดง)
+                  </a>
                 </div>
               ) : (
                 <div className="text-center py-6 text-slate-400 text-xs">

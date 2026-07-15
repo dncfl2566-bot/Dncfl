@@ -1,5 +1,5 @@
 {
-  "name": "Remix: Math Exam System 2",
+  "name": "Remix: Remix: Math Exam System 2",
   "description": "ระบบเข้าระบบทำข้อสอบวิชาคณิตศาสตร์ที่มาพร้อมระบบจับเวลา ระบบป้องกันการทุจริต และระบบแอดมินสำหรับตรวจข้อสอบและจัดการคลังข้อสอบ",
   "requestFramePermissions": [],
   "majorCapabilities": [

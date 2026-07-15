@@ -75,10 +75,14 @@ export default function AdminPanel({ onLogout }: AdminPanelProps) {
   const [studentForm, setStudentForm] = useState({ id: '', name: '', class: '3/2', number: 1 });
   const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ id: string, type: 'student' | 'question' | 'submission' | 'bulk-questions', name: string } | null>(null);
 
-  const [studentSheetUrl, setStudentSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0');
-const [mainSheetUrl, setMainSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056');
-  const [rosterSheetUrl, setRosterSheetUrl] = useState(() => {
+  // 💡 1. ลิงก์รายชื่อนักเรียน (ให้เก็บในคีย์ google_roster_sheet_url)
+  const [studentSheetUrl, setStudentSheetUrl] = useState(() => {
     return localStorage.getItem('google_roster_sheet_url') || 'https://docs.google.com/spreadsheets/d/1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods/edit?gid=0#gid=0';
+  });
+
+  // 💡 2. ลิงก์หลักเก็บข้อมูลข้อสอบ/คะแนน (ให้เก็บในคีย์ google_main_sheet_url)
+  const [sheetUrl, setSheetUrl] = useState(() => {
+    return localStorage.getItem('google_main_sheet_url') || 'https://docs.google.com/spreadsheets/d/1qngcd6-T-Zy3SAoakinBhDsYkrnoqhiOzGByxETt76U/edit?gid=1354772056#gid=1354772056';
   });
 
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);

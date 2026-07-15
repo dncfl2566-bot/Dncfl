@@ -1211,25 +1211,27 @@ async function startServer() {
     res.json({ success: true, count: initialLen - state.questions.length, message: "ลบข้อสอบที่เลือกสำเร็จ" });
   });
 app.post("/api/admin/google-sheets/connect", async (req, res) => {
-  const { accessToken, spreadsheetId, studentSpreadsheetId } = req.body;
-  const state = readDb();
-  state.googleAccessToken = accessToken;
-  state.spreadsheetId = spreadsheetId; // เก็บลิงก์หลัก (ลิงก์ 2)
-  state.studentSpreadsheetId = studentSpreadsheetId; // เก็บลิงก์รายชื่อ (ลิงก์ 1)
-  try {
-    await pushAllToGoogleSheets(accessToken, studentSpreadsheetId, spreadsheetId, state);
-    writeDb(state);
-    res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
-});
+    const { accessToken, spreadsheetId, studentSpreadsheetId } = req.body;
+    const state = readDb();
+    state.googleAccessToken = accessToken;
+    state.spreadsheetId = spreadsheetId;
+    (state as any).studentSpreadsheetId = studentSpreadsheetId;
+    try {
+      await pushAllToGoogleSheets(accessToken, studentSpreadsheetId, spreadsheetId, state);
+      writeDb(state);
+      res.json({ success: true, examStatus: state.examStatus });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
 
 app.post("/api/admin/google-sheets/pull", async (req, res) => {
-  const state = readDb();
-  try {
-    const updated = await pullAllFromGoogleSheets(state.googleAccessToken!, state.studentSpreadsheetId || "1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods", state.spreadsheetId!);
-    res.json({ success: true, data: updated });
-  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
-});
+    const state = readDb();
+    if (!state.googleAccessToken || !state.spreadsheetId) return res.status(400).json({ success: false, message: "ไม่ได้เชื่อมต่อชีต" });
+    try {
+      const studentId = (state as any).studentSpreadsheetId || "1apYsiVmw8e_zIPTUgAwl47uLXQaTEg7PbuqiqVf4Ods";
+      const updated = await pullAllFromGoogleSheets(state.googleAccessToken, studentId, state.spreadsheetId);
+      res.json({ success: true, data: updated });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
   // ADMIN API: Connect or pull Google Sheets
   app.post("/api/admin/google-sheets/connect", async (req, res) => {
     const { accessToken } = req.body;
